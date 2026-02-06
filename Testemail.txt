@@ -1,0 +1,267 @@
+package com.scb.scroeconnect.emailworker.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import java.util.concurrent.Executor;
+
+@Configuration
+@EnableAsync
+@EnableScheduling
+public class AsyncEmailConfig {
+    @Bean("emailWorkerExecutor")
+    public Executor emailWorkerExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(10);
+        executor.setMaxPoolSize(20);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("email-worker-async");
+        executor.initialize();
+        return executor;
+    }
+}
+
+
+package com.scb.scroeconnect.emailworker.poller;
+
+import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.emailworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.emailworker.repository.ConnectNotificationDeliveryRepository;
+import com.scb.scroeconnect.emailworker.service.EmailWorkerService;
+import com.scb.scroeconnect.emailworker.service.asyncservice.EmailAsyncProcessorService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Log4j2
+@Component
+@RequiredArgsConstructor
+public class EmailPoller {
+
+    private static final Logger logger = LogManager.getLogger(EmailPoller.class);
+
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+    private final EmailAsyncProcessorService emailAsyncProcessorService;
+    private static final int BATCH_SIZE = 10;
+
+    @Scheduled(fixedDelay = 10000)
+    public void pollAndProcessEmailDelivery() {
+        try {
+            logger.info("Fetching Pending Email Deliveries");
+            int batch =
+                    connectNotificationDeliveryRepository.findPendingEmailDeliveries(BATCH_SIZE);
+            if (batch == 0) {
+                return;
+            }
+
+            List<ConnectNotificationDelivery> fetch = connectNotificationDeliveryRepository.fetchProcessingBatch(PageRequest.of(0, BATCH_SIZE));
+            logger.info("Pending Email Deliveries Values {}", fetch);
+            for (ConnectNotificationDelivery delivery : fetch) {
+                emailAsyncProcessorService.processAsyncEmail(delivery);
+            }
+        } catch (Exception e) {
+            logger.error("Error while fetching Pending Email Deliveries:", e);
+            throw new RuntimeException("Error while fetching Pending Email Deliveries:", e);
+        }
+
+    }
+}
+
+
+package com.scb.scroeconnect.emailworker.service.asyncservice;
+
+import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.emailworker.entity.ConnectNotificationEmailInfo;
+import com.scb.scroeconnect.emailworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.emailworker.repository.*;
+import com.scb.scroeconnect.emailworker.service.EmailWorkerService;
+import lombok.extern.log4j.Log4j2;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import lombok.RequiredArgsConstructor;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+
+import java.util.Date;
+
+@Log4j2
+@Service
+@RequiredArgsConstructor
+public class EmailAsyncProcessorService {
+    private static final Logger logger = LogManager.getLogger(EmailAsyncProcessorService.class);
+
+    private final ConnectNotificationEventRepository connectNotificationEventRepository;
+    private final ConnectNotificationTemplateRepository connectNotificationTemplateRepository;
+    private final ConnectEventEmailConfigRepository connectEventEmailConfigRepository;
+    private final ConnectEmailInfoRepository connectEmailInfoRepository;
+    private final EmailWorkerService emailWorkerService;
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+
+    @Async("emailWorkerExecutor")
+    public void processAsyncEmail(ConnectNotificationDelivery delivery) {
+        try {
+            logger.info("Sending Email Notification {}", delivery);
+            emailWorkerService.sendEmailNotification(delivery);
+            logger.info("Update Notification Status {}", delivery);
+            connectNotificationDeliveryRepository.markSent(delivery.getId(), DeliveryStatus.SENT.toString());
+            try {
+                ConnectNotificationEmailInfo connectNotificationEmailInfo = new ConnectNotificationEmailInfo(
+                        connectNotificationEventRepository.getReferenceById(delivery.getId()),
+                        connectEventEmailConfigRepository.getReferenceById(Math.toIntExact(delivery.getId())),
+                        connectNotificationTemplateRepository.getReferenceById(delivery.getId()),
+                        delivery.getTransformedPayload());
+                connectEmailInfoRepository.save(connectNotificationEmailInfo);
+            } catch (Exception ex) {
+                logger.error("Error saving details in Connect Email Info table:", ex);
+                throw ex;
+            }
+        } catch (Exception ex) {
+            logger.error("Error while sending email:", ex);
+            handleFailure(delivery, ex);
+        }
+    }
+
+    private void handleFailure(ConnectNotificationDelivery delivery, Exception ex) {
+        int nextRetry = delivery.getRetryCount() + 1;
+        Date nextRetryTime = calculateBackoff(nextRetry);
+        connectNotificationDeliveryRepository.updateStatusAndRetryById(delivery.getId(), DeliveryStatus.RETRY.name(), nextRetryTime);
+    }
+
+    private Date calculateBackoff(int retryCount) {
+        long delaySeconds = (long) Math.pow(2, retryCount) * 60;
+        return new Date(System.currentTimeMillis() + delaySeconds * 1000);
+    }
+}
+
+
+package com.scb.scroeconnect.emailworker.service;
+
+import com.scb.scroeconnect.emailworker.config.EmailWorkerConfig;
+import com.scb.scroeconnect.emailworker.config.RetryableRestTemplate;
+import com.scb.scroeconnect.emailworker.dto.EmailPayloadDTO;
+import com.scb.scroeconnect.emailworker.dto.EmailRequestDTO;
+import com.scb.scroeconnect.emailworker.entity.ConnectEventEmailConfig;
+import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.emailworker.repository.ConnectEventEmailConfigRepository;
+import com.scb.scroeconnect.emailworker.repository.ConnectNotificationDeliveryRepository;
+import jakarta.transaction.Transactional;
+import lombok.extern.log4j.Log4j2;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.http.*;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+
+@Log4j2
+@Service
+public class EmailWorkerService {
+    private static final Logger logger = LogManager.getLogger(EmailWorkerService.class);
+
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+    private final ConnectEventEmailConfigRepository connectEventEmailConfigRepository;
+    private RetryableRestTemplate restTemplate;
+    private final EmailWorkerConfig emailWorkerConfig;
+
+    public EmailWorkerService(ConnectEventEmailConfigRepository connectEventEmailConfigRepository, RetryableRestTemplate restTemplate, EmailWorkerConfig emailWorkerConfig, ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository) {
+        this.connectEventEmailConfigRepository = connectEventEmailConfigRepository;
+        this.restTemplate = restTemplate;
+        this.emailWorkerConfig = emailWorkerConfig;
+        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
+    }
+
+    @Transactional
+    public void sendEmailNotification(ConnectNotificationDelivery connectNotificationDelivery) {
+
+        ConnectNotificationDelivery delivery = connectNotificationDeliveryRepository.findById(connectNotificationDelivery.getId()).orElseThrow(() -> new IllegalStateException("Delivery not found"));
+
+        logger.info("Get Transformed payload {}", delivery.getTransformedPayload());
+        // 🔒 Idempotency / retry safety
+        if (delivery.getTransformedPayload().getMessageId() == null) {
+
+            String messageId = UUID.randomUUID().toString();
+            EmailPayloadDTO payload = delivery.getTransformedPayload();
+            if (payload == null) {
+                payload = new EmailPayloadDTO();
+            }
+
+            payload.setMessageId(messageId);
+            payload.setInitiatedTimestamp(new Date());
+
+            delivery.setTransformedPayload(payload);
+        }
+
+        logger.info("Get Final payload {}", delivery.getTransformedPayload());
+
+        try {
+            logger.info("Sending Email");
+            sendEmail(delivery);
+        } catch (Exception ex) {
+            logger.error("Error while sending email", ex);
+            throw new RuntimeException("Error while fetching Pending Email Deliveries:", ex);
+        }
+    }
+
+    public boolean sendEmail(ConnectNotificationDelivery notificationDelivery) {
+        Optional<ConnectEventEmailConfig> connectEventEmailConfigOptional = connectEventEmailConfigRepository.findById(notificationDelivery.getRecipient().getEmail_config_id());
+
+        logger.info("Get Recipients Details {}", connectEventEmailConfigOptional.get());
+
+        if (connectEventEmailConfigOptional.isEmpty()) {
+            return false;
+        }
+
+        UUID uuid = UUID.randomUUID();
+        String messageId = uuid.toString();
+        notificationDelivery.getTransformedPayload().setMessageId(messageId);
+        notificationDelivery.getTransformedPayload().setInitiatedTimestamp(new Date());
+
+        ConnectEventEmailConfig connectEventEmailConfig = connectEventEmailConfigOptional.get();
+
+        EmailRequestDTO body = new EmailRequestDTO();
+
+        body.set_id("1001");
+        body.setCountry(notificationDelivery.getTransformedPayload().getCountry());
+        body.setRecipients(connectEventEmailConfig.getRecipients());
+        body.setCc(connectEventEmailConfig.getCc());
+        body.setBcc(connectEventEmailConfig.getBcc());
+        body.setReplyTo(connectEventEmailConfig.getReplyTo());
+        body.setNotificationType(notificationDelivery.getTransformedPayload().getNotificationType());
+        body.setSubject(notificationDelivery.getTransformedPayload().getSubject());
+        body.setContentType(notificationDelivery.getTransformedPayload().getContentType());
+        body.setContentBody(notificationDelivery.getTransformedPayload().getContentBody());
+        body.setEncoding("");
+        body.setPriority("");
+        body.setAttachments(Collections.singletonList(""));
+
+        logger.info("Get Send Email DTO {}", body);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        HttpEntity<EmailRequestDTO> requestEntity = new HttpEntity<>(body, headers);
+
+        try {
+            ResponseEntity<String> resp =
+                    restTemplate.exchange(
+                            emailWorkerConfig.getSendEmailApi(),
+                            HttpMethod.POST,
+                            requestEntity
+                    );
+
+            return resp.getStatusCode().is2xxSuccessful();
+        } catch (Exception ex) {
+            logger.error("Error while sending email", ex);
+            throw new RuntimeException("Error while fetching Pending Email Deliveries:", ex);
+        }
+    }
+}
