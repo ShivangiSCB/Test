@@ -1,0 +1,233 @@
+package com.scb.scroeconnect.emailworker.entity;
+
+import com.scb.scroeconnect.emailworker.converter.EmailPayloadConverter;
+import com.scb.scroeconnect.emailworker.dto.EmailPayloadDTO;
+import jakarta.persistence.*;
+
+import java.math.BigInteger;
+import java.util.Date;
+
+@Entity
+@Table(name = "connect_notification_delivery")
+public class ConnectNotificationDelivery {
+    @Id
+    @Column(name = "id")
+    private BigInteger id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "event_id", referencedColumnName = "event_id", nullable = false)
+    private ConnectNotificationEvent connectNotificationEvent;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "recipient_id", referencedColumnName = "id", nullable = false)
+    private ConnectEventEmailConfig recipient;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "template_id", referencedColumnName = "template_id", nullable = false)
+    private ConnectNotificationTemplate template_id;
+
+    @Convert(converter = EmailPayloadConverter.class)
+    @Column(name = "transformed_payload", columnDefinition = "TEXT")
+    private EmailPayloadDTO finalPayload;
+
+    @Column(name = "delivery_mode")
+    private String delivery_mode;
+
+    @Column(name = "status")
+    private String status;
+
+    @Column(name = "retry_count")
+    private int retryCount;
+
+    @Column(name = "available_at")
+    private Date availableAt;
+
+    @Column(name = "updated_at")
+    private Date updated_at;
+
+    public ConnectNotificationDelivery() {
+    }
+
+    public ConnectNotificationDelivery(ConnectNotificationEvent connectNotificationEvent, ConnectEventEmailConfig recipient, ConnectNotificationTemplate template_id, EmailPayloadDTO finalPayload, String delivery_mode, String status) {
+        this.connectNotificationEvent = connectNotificationEvent;
+        this.recipient = recipient;
+        this.template_id = template_id;
+        this.finalPayload = finalPayload;
+        this.delivery_mode = delivery_mode;
+        this.status = status;
+        this.availableAt = new Date();
+        this.updated_at = new Date();
+    }
+
+    public BigInteger getId() {
+        return id;
+    }
+
+    public void setId(BigInteger id) {
+        this.id = id;
+    }
+
+    public String getDelivery_mode() {
+        return delivery_mode;
+    }
+
+    public void setDelivery_mode(String delivery_mode) {
+        this.delivery_mode = delivery_mode;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public ConnectNotificationEvent getConnectNotificationEvent() {
+        return connectNotificationEvent;
+    }
+
+    public void setConnectNotificationEvent(ConnectNotificationEvent connectNotificationEvent) {
+        this.connectNotificationEvent = connectNotificationEvent;
+    }
+
+    public ConnectEventEmailConfig getRecipient() {
+        return recipient;
+    }
+
+    public void setRecipient(ConnectEventEmailConfig recipient) {
+        this.recipient = recipient;
+    }
+
+    public ConnectNotificationTemplate getTemplate_id() {
+        return template_id;
+    }
+
+    public void setTemplate_id(ConnectNotificationTemplate template_id) {
+        this.template_id = template_id;
+    }
+
+    public EmailPayloadDTO getFinalPayload() {
+        return finalPayload;
+    }
+
+    public void setFinalPayload(EmailPayloadDTO finalPayload) {
+        this.finalPayload = finalPayload;
+    }
+
+    public int getRetryCount() {
+        return retryCount;
+    }
+
+    public void setRetryCount(int retryCount) {
+        this.retryCount = retryCount;
+    }
+
+    public Date getAvailableAt() {
+        return availableAt;
+    }
+
+    public void setAvailableAt(Date availableAt) {
+        this.availableAt = availableAt;
+    }
+
+    public Date getUpdated_at() {
+        return updated_at;
+    }
+
+    public void setUpdated_at(Date updated_at) {
+        this.updated_at = updated_at;
+    }
+}
+
+package com.scb.scroeconnect.emailworker.repository;
+
+import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigInteger;
+import java.util.Date;
+import java.util.List;
+
+@Repository
+public interface ConnectNotificationDeliveryRepository extends JpaRepository<ConnectNotificationDelivery, BigInteger> {
+
+    @Transactional
+    @Query(value = """
+            UPDATE connect_notification_delivery
+            SET status = 'PROCESSING',
+                updated_at = NOW()
+            WHERE id IN (
+                SELECT id
+                FROM connect_notification_delivery
+                WHERE status IN ('PENDING', 'RETRY')
+                    AND delivery_mode = 'EMAIL'
+                    AND (available_at IS NULL OR available_at <= NOW())
+                ORDER BY id
+                FOR UPDATE SKIP LOCKED
+                LIMIT :batchSize
+            )
+            RETURNING id, event_id, recipient_id, template_id, final_payload, retry count
+            """, nativeQuery = true)
+    List<ConnectNotificationDelivery> findPendingEmailDeliveries(@Param("batchSize") int batchSize);
+
+
+    @Modifying
+    @Transactional
+    @Query(value = "UPDATE connect_notification_delivery SET status = :status, " +
+            "retry_count = retry_count + 1, available_at = :availableAt, updated_at = NOW() WHERE id = :id")
+    void updateStatusAndRetryById(BigInteger id, String status, Date availableAt);
+
+    @Modifying
+    @Transactional
+    @Query(value = "UPDATE connect_notification_delivery SET status = :status, " +
+            "updated_at = NOW() WHERE id = :id")
+    void markSent(BigInteger id, String status);
+
+}
+
+
+package com.scb.scroeconnect.emailworker.poller;
+
+import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.emailworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.emailworker.repository.ConnectNotificationDeliveryRepository;
+import com.scb.scroeconnect.emailworker.service.EmailWorkerService;
+import com.scb.scroeconnect.emailworker.service.asyncservice.EmailAsyncProcessorService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+@RequiredArgsConstructor
+public class EmailPoller {
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+    private final EmailAsyncProcessorService emailAsyncProcessorService;
+    private static final int BATCH_SIZE = 10;
+
+    @Scheduled(fixedDelay = 10000)
+    public void pollAndProcessEmailDelivery() {
+        List<ConnectNotificationDelivery> batch =
+                connectNotificationDeliveryRepository.findPendingEmailDeliveries(BATCH_SIZE);
+        if (batch.isEmpty()) {
+            return;
+        }
+        for (ConnectNotificationDelivery delivery : batch) {
+            emailAsyncProcessorService.processAsyncEmail(delivery);
+        }
+
+    }
+}
+
+org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'emailPoller' defined in file [C:\Users\2035187\Scroe\SCROE_UPDATED\51241-scroe-connect-notification-delivery-email\target\classes\com\scb\scroeconnect\emailworker\poller\EmailPoller.class]: Unsatisfied dependency expressed through constructor parameter 0: Error creating bean with name 'connectNotificationDeliveryRepository' defined in com.scb.scroeconnect.emailworker.repository.ConnectNotificationDeliveryRepository defined in @EnableJpaRepositories declared on DataJpaRepositoriesRegistrar.EnableJpaRepositoriesConfiguration: Not a managed type: class com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery
+Caused by: java.lang.IllegalArgumentException: Not a managed type: class com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery
+	at org.hibernate.metamodel.model.domain.internal.JpaMetamodelImpl.managedType(JpaMetamodelImpl.java:254) ~[hibernate-core-7.2.1.Final.jar:7.2.1.Final]
+	at org.hibernate.metamodel.model.domain.internal.MappingMetamodelImpl.managedType(MappingMetamodelImpl.java:394) ~[hibernate-core-7.2.1.Final.jar:7.2.1.Final]
+	at org.hiberna
