@@ -1,267 +1,576 @@
 package com.scb.scroeconnect.emailworker.config;
 
-import org.springframework.context.annotation.Bean;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.EnableAsync;
-import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-
-import java.util.concurrent.Executor;
 
 @Configuration
-@EnableAsync
-@EnableScheduling
-public class AsyncEmailConfig {
-    @Bean("emailWorkerExecutor")
-    public Executor emailWorkerExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(10);
-        executor.setMaxPoolSize(20);
-        executor.setQueueCapacity(200);
-        executor.setThreadNamePrefix("email-worker-async");
-        executor.initialize();
-        return executor;
+public class EmailWorkerConfig {
+
+    @Value("${dnio.send.email.api}")
+    private String sendEmailApi;
+
+    public EmailWorkerConfig() {
+    }
+
+    public String getSendEmailApi() {
+        return sendEmailApi;
+    }
+
+    public void setSendEmailApi(String sendEmailApi) {
+        this.sendEmailApi = sendEmailApi;
     }
 }
 
 
-package com.scb.scroeconnect.emailworker.poller;
+package com.scb.scroeconnect.emailworker.config;
 
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.emailworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.emailworker.repository.ConnectNotificationDeliveryRepository;
-import com.scb.scroeconnect.emailworker.service.EmailWorkerService;
-import com.scb.scroeconnect.emailworker.service.asyncservice.EmailAsyncProcessorService;
-import lombok.RequiredArgsConstructor;
+import org.apache.hc.client5.http.ConnectionKeepAliveStrategy;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
+import org.apache.hc.client5.http.socket.ConnectionSocketFactory;
+import org.apache.hc.client5.http.socket.PlainConnectionSocketFactory;
+import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
+import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
+import org.apache.hc.core5.http.HeaderElement;
+import org.apache.hc.core5.http.config.RegistryBuilder;
+import org.apache.hc.core5.http.message.BasicHeaderElementIterator;
+import org.apache.hc.core5.ssl.SSLContexts;
+import org.apache.hc.core5.ssl.TrustStrategy;
+import org.apache.hc.core5.util.TimeValue;
+import org.apache.hc.core5.util.Timeout;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.BufferingClientHttpRequestFactory;
+import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+
+import javax.net.ssl.SSLContext;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+
+@Configuration
+public class RestTemplate extends org.springframework.web.client.RestTemplate implements InitializingBean {
+    public static final String CONN_KEEP_ALIVE = "Keep-Alive";
+
+
+    @Override
+    public void afterPropertiesSet() throws Exception {
+        this.setRequestFactory(clientHttpRequestFactory());
+    }
+
+    private ClientHttpRequestFactory clientHttpRequestFactory() throws NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
+        HttpClientBuilder httpClientBuilder = HttpClientBuilder.create()
+                .setDefaultRequestConfig(reqConfig())
+                .setConnectionManager(poolMgr())
+                .setKeepAliveStrategy(keepAliveStrategy());
+        CloseableHttpClient client = httpClientBuilder.build();
+        return new BufferingClientHttpRequestFactory(new HttpComponentsClientHttpRequestFactory(client));
+    }
+
+    private RequestConfig reqConfig() {
+        return RequestConfig.custom()
+                .setConnectTimeout(Timeout.ofMilliseconds(30000))
+                .setConnectionRequestTimeout(Timeout.ofMilliseconds(30000))
+                .build();
+    }
+
+    private PoolingHttpClientConnectionManager poolMgr() throws NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
+        TrustStrategy trustStrategy = (x509CertChain, authType) -> true;
+        SSLContext sslContext = SSLContexts.custom()
+                .loadTrustMaterial(null, trustStrategy)
+                .build();
+        SSLConnectionSocketFactory csf = new SSLConnectionSocketFactory(sslContext, NoopHostnameVerifier.INSTANCE);
+        PoolingHttpClientConnectionManager poolingHttpClientConnectionManager = new PoolingHttpClientConnectionManager(RegistryBuilder.<ConnectionSocketFactory>create()
+                .register("http", PlainConnectionSocketFactory.INSTANCE)
+                .register("https", csf)
+                .build());
+        poolingHttpClientConnectionManager.setMaxTotal(30);
+        poolingHttpClientConnectionManager.setDefaultMaxPerRoute(30);
+        return poolingHttpClientConnectionManager;
+    }
+
+
+    private ConnectionKeepAliveStrategy keepAliveStrategy() {
+        return (response, context) -> {
+            BasicHeaderElementIterator it = new BasicHeaderElementIterator(response.headerIterator(CONN_KEEP_ALIVE));
+            while (it.hasNext()) {
+                HeaderElement he = it.next();
+                String param = he.getName();
+                String value = he.getValue();
+                if (value != null && param.equalsIgnoreCase("timeout")) {
+                    return TimeValue.ofSeconds(Long.parseLong(value));
+                }
+            }
+            return TimeValue.ofSeconds(30);
+        };
+    }
+}
+
+package com.scb.scroeconnect.emailworker.config;
+
+import com.scb.scroeconnect.emailworker.exception.RetryableApiException;
 import lombok.extern.log4j.Log4j2;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.retry.annotation.EnableRetry;
+import org.springframework.retry.annotation.Recover;
+import org.springframework.retry.annotation.Retryable;
+import org.springframework.web.client.RestTemplate;
+
+@EnableRetry
+@Configuration
+@Log4j2
+public class RetryableRestTemplate {
+    private final RestTemplate restTemplate;
+
+    public RetryableRestTemplate(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
+
+    @Retryable(retryFor = RetryableApiException.class)
+    public ResponseEntity<String> exchange(String url, HttpMethod status, HttpEntity<?> requestEntity) {
+        return restTemplate.exchange(url, status, requestEntity, String.class);
+    }
+
+    @Retryable(retryFor = RetryableApiException.class)
+    public <T> ResponseEntity<T> getForEntity(String url, Class<T> responseObject) {
+        return restTemplate.getForEntity(url, responseObject);
+    }
+
+    @Recover
+    public ResponseEntity<String> recover(RetryableApiException r, String url, HttpMethod status, HttpEntity<?> requestEntity) {
+        return new ResponseEntity(r.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    @Recover
+    public ResponseEntity<String> recover(Exception e, String url, HttpMethod status, HttpEntity<?> requestEntity) {
+        log.error(requestEntity, e);
+        return new ResponseEntity(e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+}
+
+package com.scb.scroeconnect.emailworker.converter;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scb.scroeconnect.emailworker.dto.EmailPayloadDTO;
+import jakarta.persistence.AttributeConverter;
+import jakarta.persistence.Converter;
+
+@Converter(autoApply = false)
+public class EmailPayloadConverter implements AttributeConverter<EmailPayloadDTO, String> {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    @Override
+    public String convertToDatabaseColumn(EmailPayloadDTO emailPayloadDTO) {
+        if (emailPayloadDTO == null) return null;
+        try {
+            return OBJECT_MAPPER.writeValueAsString(emailPayloadDTO);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to serialize EmailPayloadDTO", e);
+        }
+    }
+
+    @Override
+    public EmailPayloadDTO convertToEntityAttribute(String emailData) {
+        if (emailData == null) return null;
+        try {
+            return OBJECT_MAPPER.readValue(emailData, EmailPayloadDTO.class);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to deserialize EmailPayloadDTO", e);
+        }
+    }
+}
+
+package com.scb.scroeconnect.emailworker.converter;
+
+import jakarta.persistence.AttributeConverter;
+import jakarta.persistence.Converter;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Converter
+public class StringListConverter implements AttributeConverter<List<String>, String> {
+
+    private static final String DELIMITER = ",";
+
+    @Override
+    public String convertToDatabaseColumn(List<String> attribute) {
+        if (attribute == null || attribute.isEmpty()) {
+            return null;
+        }
+        return attribute.stream()
+                .map(String::trim)
+                .collect(Collectors.joining(DELIMITER));
+    }
+
+    @Override
+    public List<String> convertToEntityAttribute(String dbData) {
+        if (dbData == null || dbData.isBlank()) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(dbData.split(DELIMITER))
+                .map(String::trim)
+                .collect(Collectors.toList());
+    }
+
+
+}
+
+package com.scb.scroeconnect.emailworker.dto;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.Date;
+
+public class EmailPayloadDTO {
+    private String messageId;
+    private String subject;
+    private JsonNode contentBody;
+    private String attachment;
+    private String country;
+    private String notificationType;
+    private String contentType;
+    private String priority;
+    private String refId;
+    private Date initiatedTimestamp;
+
+    public EmailPayloadDTO() {
+    }
+
+    public JsonNode getContentBody() {
+        return contentBody;
+    }
+
+    public String getMessageId() {
+        return messageId;
+    }
+
+    public void setMessageId(String messageId) {
+        this.messageId = messageId;
+    }
+
+    public String getSubject() {
+        return subject;
+    }
+
+    public void setSubject(String subject) {
+        this.subject = subject;
+    }
+
+    public void setContentBody(JsonNode contentBody) {
+        this.contentBody = contentBody;
+    }
+
+    public String getRefId() {
+        return refId;
+    }
+
+    public void setRefId(String refId) {
+        this.refId = refId;
+    }
+
+    public String getAttachment() {
+        return attachment;
+    }
+
+    public void setAttachment(String attachment) {
+        this.attachment = attachment;
+    }
+
+    public Date getInitiatedTimestamp() {
+        return initiatedTimestamp;
+    }
+
+    public void setInitiatedTimestamp(Date initiatedTimestamp) {
+        this.initiatedTimestamp = initiatedTimestamp;
+    }
+
+    public String getCountry() {
+        return country;
+    }
+
+    public void setCountry(String country) {
+        this.country = country;
+    }
+
+    public String getNotificationType() {
+        return notificationType;
+    }
+
+    public void setNotificationType(String notificationType) {
+        this.notificationType = notificationType;
+    }
+
+    public String getContentType() {
+        return contentType;
+    }
+
+    public void setContentType(String contentType) {
+        this.contentType = contentType;
+    }
+
+    public String getPriority() {
+        return priority;
+    }
+
+    public void setPriority(String priority) {
+        this.priority = priority;
+    }
+}
+
+package com.scb.scroeconnect.emailworker.dto;
+
+import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.List;
 
-@Log4j2
-@Component
-@RequiredArgsConstructor
-public class EmailPoller {
+public class EmailRequestDTO {
+    private String _id;
+    private String country;
+    private List<String> recipients;
+    private List<String> cc;
+    private List<String> bcc;
+    private String replyTo;
+    private String notificationType;
+    private String subject;
+    private String contentType;
+    private String contentBody;
+    private String encoding;
+    private String priority;
+    private List<Object> attachments;
 
-    private static final Logger logger = LogManager.getLogger(EmailPoller.class);
+    public EmailRequestDTO() {
+    }
 
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    private final EmailAsyncProcessorService emailAsyncProcessorService;
-    private static final int BATCH_SIZE = 10;
+    public String get_id() {
+        return _id;
+    }
 
-    @Scheduled(fixedDelay = 10000)
-    public void pollAndProcessEmailDelivery() {
-        try {
-            logger.info("Fetching Pending Email Deliveries");
-            int batch =
-                    connectNotificationDeliveryRepository.findPendingEmailDeliveries(BATCH_SIZE);
-            if (batch == 0) {
-                return;
-            }
+    public void set_id(String _id) {
+        this._id = _id;
+    }
 
-            List<ConnectNotificationDelivery> fetch = connectNotificationDeliveryRepository.fetchProcessingBatch(PageRequest.of(0, BATCH_SIZE));
-            logger.info("Pending Email Deliveries Values {}", fetch);
-            for (ConnectNotificationDelivery delivery : fetch) {
-                emailAsyncProcessorService.processAsyncEmail(delivery);
-            }
-        } catch (Exception e) {
-            logger.error("Error while fetching Pending Email Deliveries:", e);
-            throw new RuntimeException("Error while fetching Pending Email Deliveries:", e);
-        }
+    public String getCountry() {
+        return country;
+    }
 
+    public void setCountry(String country) {
+        this.country = country;
+    }
+
+    public List<String> getRecipients() {
+        return recipients;
+    }
+
+    public void setRecipients(List<String> recipients) {
+        this.recipients = recipients;
+    }
+
+    public List<String> getCc() {
+        return cc;
+    }
+
+    public void setCc(List<String> cc) {
+        this.cc = cc;
+    }
+
+    public List<String> getBcc() {
+        return bcc;
+    }
+
+    public void setBcc(List<String> bcc) {
+        this.bcc = bcc;
+    }
+
+    public String getReplyTo() {
+        return replyTo;
+    }
+
+    public void setReplyTo(String replyTo) {
+        this.replyTo = replyTo;
+    }
+
+    public String getNotificationType() {
+        return notificationType;
+    }
+
+    public void setNotificationType(String notificationType) {
+        this.notificationType = notificationType;
+    }
+
+    public String getSubject() {
+        return subject;
+    }
+
+    public void setSubject(String subject) {
+        this.subject = subject;
+    }
+
+    public String getContentType() {
+        return contentType;
+    }
+
+    public void setContentType(String contentType) {
+        this.contentType = contentType;
+    }
+
+    public String getContentBody() {
+        return contentBody;
+    }
+
+    public void setContentBody(String contentBody) {
+        this.contentBody = contentBody;
+    }
+
+    public String getEncoding() {
+        return encoding;
+    }
+
+    public void setEncoding(String encoding) {
+        this.encoding = encoding;
+    }
+
+    public String getPriority() {
+        return priority;
+    }
+
+    public void setPriority(String priority) {
+        this.priority = priority;
+    }
+
+    public List<Object> getAttachments() {
+        return attachments;
+    }
+
+    public void setAttachments(List<Object> attachments) {
+        this.attachments = attachments;
     }
 }
 
+package com.scb.scroeconnect.emailworker.entity;
 
-package com.scb.scroeconnect.emailworker.service.asyncservice;
+import jakarta.persistence.*;
 
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationEmailInfo;
-import com.scb.scroeconnect.emailworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.emailworker.repository.*;
-import com.scb.scroeconnect.emailworker.service.EmailWorkerService;
-import lombok.extern.log4j.Log4j2;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import lombok.RequiredArgsConstructor;
-import org.springframework.scheduling.annotation.Async;
-import org.springframework.stereotype.Service;
+@Entity
+@Table(name = "connect_notification_recipient")
+public class ConnectNotificationRecipient {
 
-import java.util.Date;
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
+    private Long id;
 
-@Log4j2
-@Service
-@RequiredArgsConstructor
-public class EmailAsyncProcessorService {
-    private static final Logger logger = LogManager.getLogger(EmailAsyncProcessorService.class);
-
-    private final ConnectNotificationEventRepository connectNotificationEventRepository;
-    private final ConnectNotificationTemplateRepository connectNotificationTemplateRepository;
-    private final ConnectEventEmailConfigRepository connectEventEmailConfigRepository;
-    private final ConnectEmailInfoRepository connectEmailInfoRepository;
-    private final EmailWorkerService emailWorkerService;
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-
-    @Async("emailWorkerExecutor")
-    public void processAsyncEmail(ConnectNotificationDelivery delivery) {
-        try {
-            logger.info("Sending Email Notification {}", delivery);
-            emailWorkerService.sendEmailNotification(delivery);
-            logger.info("Update Notification Status {}", delivery);
-            connectNotificationDeliveryRepository.markSent(delivery.getId(), DeliveryStatus.SENT.toString());
-            try {
-                ConnectNotificationEmailInfo connectNotificationEmailInfo = new ConnectNotificationEmailInfo(
-                        connectNotificationEventRepository.getReferenceById(delivery.getId()),
-                        connectEventEmailConfigRepository.getReferenceById(Math.toIntExact(delivery.getId())),
-                        connectNotificationTemplateRepository.getReferenceById(delivery.getId()),
-                        delivery.getTransformedPayload());
-                connectEmailInfoRepository.save(connectNotificationEmailInfo);
-            } catch (Exception ex) {
-                logger.error("Error saving details in Connect Email Info table:", ex);
-                throw ex;
-            }
-        } catch (Exception ex) {
-            logger.error("Error while sending email:", ex);
-            handleFailure(delivery, ex);
-        }
+    public Long getId() {
+        return id;
     }
 
-    private void handleFailure(ConnectNotificationDelivery delivery, Exception ex) {
-        int nextRetry = delivery.getRetryCount() + 1;
-        Date nextRetryTime = calculateBackoff(nextRetry);
-        connectNotificationDeliveryRepository.updateStatusAndRetryById(delivery.getId(), DeliveryStatus.RETRY.name(), nextRetryTime);
-    }
-
-    private Date calculateBackoff(int retryCount) {
-        long delaySeconds = (long) Math.pow(2, retryCount) * 60;
-        return new Date(System.currentTimeMillis() + delaySeconds * 1000);
+    public void setId(Long id) {
+        this.id = id;
     }
 }
 
+package com.scb.scroeconnect.emailworker.entity;
 
-package com.scb.scroeconnect.emailworker.service;
+import jakarta.persistence.*;
+import lombok.Data;
+import org.antlr.v4.runtime.misc.NotNull;
 
-import com.scb.scroeconnect.emailworker.config.EmailWorkerConfig;
-import com.scb.scroeconnect.emailworker.config.RetryableRestTemplate;
-import com.scb.scroeconnect.emailworker.dto.EmailPayloadDTO;
-import com.scb.scroeconnect.emailworker.dto.EmailRequestDTO;
-import com.scb.scroeconnect.emailworker.entity.ConnectEventEmailConfig;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.emailworker.repository.ConnectEventEmailConfigRepository;
-import com.scb.scroeconnect.emailworker.repository.ConnectNotificationDeliveryRepository;
-import jakarta.transaction.Transactional;
-import lombok.extern.log4j.Log4j2;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.springframework.http.*;
-import org.springframework.stereotype.Service;
+import java.math.BigInteger;
 
-import java.util.*;
+@Data
+@Entity
+@Table(name = "connect_notification_template")
+public class ConnectNotificationTemplate {
 
-@Log4j2
-@Service
-public class EmailWorkerService {
-    private static final Logger logger = LogManager.getLogger(EmailWorkerService.class);
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    private final ConnectEventEmailConfigRepository connectEventEmailConfigRepository;
-    private RetryableRestTemplate restTemplate;
-    private final EmailWorkerConfig emailWorkerConfig;
+    @Column(nullable = false)
+    @NotNull
+    private String name;
 
-    public EmailWorkerService(ConnectEventEmailConfigRepository connectEventEmailConfigRepository, RetryableRestTemplate restTemplate, EmailWorkerConfig emailWorkerConfig, ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository) {
-        this.connectEventEmailConfigRepository = connectEventEmailConfigRepository;
-        this.restTemplate = restTemplate;
-        this.emailWorkerConfig = emailWorkerConfig;
-        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
+    @Column(name = "template_type", nullable = false)
+    @NotNull
+    private String templateType;
+
+    @Column(columnDefinition = "TEXT", nullable = false)
+    @NotNull
+    private String template;
+
+    @Column(name = "delete_flag", nullable = false)
+    private boolean deleteFlag;
+
+
+
+    public Long getId() {
+        return id;
     }
 
-    @Transactional
-    public void sendEmailNotification(ConnectNotificationDelivery connectNotificationDelivery) {
-
-        ConnectNotificationDelivery delivery = connectNotificationDeliveryRepository.findById(connectNotificationDelivery.getId()).orElseThrow(() -> new IllegalStateException("Delivery not found"));
-
-        logger.info("Get Transformed payload {}", delivery.getTransformedPayload());
-        // 🔒 Idempotency / retry safety
-        if (delivery.getTransformedPayload().getMessageId() == null) {
-
-            String messageId = UUID.randomUUID().toString();
-            EmailPayloadDTO payload = delivery.getTransformedPayload();
-            if (payload == null) {
-                payload = new EmailPayloadDTO();
-            }
-
-            payload.setMessageId(messageId);
-            payload.setInitiatedTimestamp(new Date());
-
-            delivery.setTransformedPayload(payload);
-        }
-
-        logger.info("Get Final payload {}", delivery.getTransformedPayload());
-
-        try {
-            logger.info("Sending Email");
-            sendEmail(delivery);
-        } catch (Exception ex) {
-            logger.error("Error while sending email", ex);
-            throw new RuntimeException("Error while fetching Pending Email Deliveries:", ex);
-        }
+    public void setId(Long id) {
+        this.id = id;
     }
 
-    public boolean sendEmail(ConnectNotificationDelivery notificationDelivery) {
-        Optional<ConnectEventEmailConfig> connectEventEmailConfigOptional = connectEventEmailConfigRepository.findById(notificationDelivery.getRecipient().getEmail_config_id());
+    public String getName() {
+        return name;
+    }
 
-        logger.info("Get Recipients Details {}", connectEventEmailConfigOptional.get());
+    public void setName(String name) {
+        this.name = name;
+    }
 
-        if (connectEventEmailConfigOptional.isEmpty()) {
-            return false;
-        }
+    public String getTemplateType() {
+        return templateType;
+    }
 
-        UUID uuid = UUID.randomUUID();
-        String messageId = uuid.toString();
-        notificationDelivery.getTransformedPayload().setMessageId(messageId);
-        notificationDelivery.getTransformedPayload().setInitiatedTimestamp(new Date());
+    public void setTemplateType(String templateType) {
+        this.templateType = templateType;
+    }
 
-        ConnectEventEmailConfig connectEventEmailConfig = connectEventEmailConfigOptional.get();
+    public String getTemplate() {
+        return template;
+    }
 
-        EmailRequestDTO body = new EmailRequestDTO();
+    public void setTemplate(String template) {
+        this.template = template;
+    }
 
-        body.set_id("1001");
-        body.setCountry(notificationDelivery.getTransformedPayload().getCountry());
-        body.setRecipients(connectEventEmailConfig.getRecipients());
-        body.setCc(connectEventEmailConfig.getCc());
-        body.setBcc(connectEventEmailConfig.getBcc());
-        body.setReplyTo(connectEventEmailConfig.getReplyTo());
-        body.setNotificationType(notificationDelivery.getTransformedPayload().getNotificationType());
-        body.setSubject(notificationDelivery.getTransformedPayload().getSubject());
-        body.setContentType(notificationDelivery.getTransformedPayload().getContentType());
-        body.setContentBody(notificationDelivery.getTransformedPayload().getContentBody());
-        body.setEncoding("");
-        body.setPriority("");
-        body.setAttachments(Collections.singletonList(""));
+    public boolean isDeleteFlag() {
+        return deleteFlag;
+    }
 
-        logger.info("Get Send Email DTO {}", body);
+    public void setDeleteFlag(boolean deleteFlag) {
+        this.deleteFlag = deleteFlag;
+    }
+}
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
+package com.scb.scroeconnect.emailworker.exception;
 
-        HttpEntity<EmailRequestDTO> requestEntity = new HttpEntity<>(body, headers);
+import lombok.Getter;
+import org.springframework.http.HttpStatusCode;
 
-        try {
-            ResponseEntity<String> resp =
-                    restTemplate.exchange(
-                            emailWorkerConfig.getSendEmailApi(),
-                            HttpMethod.POST,
-                            requestEntity
-                    );
+@Getter
+public class RetryableApiException extends RuntimeException {
 
-            return resp.getStatusCode().is2xxSuccessful();
-        } catch (Exception ex) {
-            logger.error("Error while sending email", ex);
-            throw new RuntimeException("Error while fetching Pending Email Deliveries:", ex);
-        }
+    private HttpStatusCode  httpStatusCode;
+    public RetryableApiException(String s) {
+        super(s);
+    }
+
+    public RetryableApiException(String s, HttpStatusCode httpStatusCode) {
+        super(s);
+        this.httpStatusCode=httpStatusCode;
     }
 }
