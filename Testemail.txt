@@ -1,125 +1,3 @@
-package com.scb.scroeconnect.solaceworker.config;
-
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.EnableAsync;
-import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-
-import java.util.concurrent.Executor;
-
-@Configuration
-@EnableAsync
-@EnableScheduling
-public class AsyncSolaceConfig {
-    @Bean("solaceWorkerExecutor")
-    public Executor emailWorkerExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(10);
-        executor.setMaxPoolSize(20);
-        executor.setQueueCapacity(200);
-        executor.setThreadNamePrefix("solace-worker-async");
-        executor.initialize();
-        return executor;
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.config;
-
-import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
-import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
-import com.solacesystems.jcsmp.*;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-
-import java.util.Optional;
-
-@Configuration
-public class SolaceConnectionConfig {
-
-    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
-
-    public SolaceConnectionConfig(ConnectSolaceConfigRepository connectSolaceConfigRepository) {
-        this.connectSolaceConfigRepository = connectSolaceConfigRepository;
-    }
-
-    @Bean
-    public JCSMPSession jcsmpSession() throws JCSMPException {
-        Optional<ConnectSolaceConfig> connectSolaceConfig = connectSolaceConfigRepository.findBySolaceInfoId();
-        JCSMPProperties props = new JCSMPProperties();
-        props.setProperty(JCSMPProperties.HOST, connectSolaceConfig.get().getHost());
-        props.setProperty(JCSMPProperties.VPN_NAME, connectSolaceConfig.get().getVpn());
-        props.setProperty(JCSMPProperties.USERNAME, connectSolaceConfig.get().getUsername());
-        props.setProperty(JCSMPProperties.PASSWORD, connectSolaceConfig.get().getPassword());
-
-        JCSMPSession session = JCSMPFactory.onlyInstance().createSession(props);
-        session.connect();
-
-        return session;
-    }
-
-    @Bean
-    public XMLMessageProducer solaceProducer(JCSMPSession session) throws JCSMPException {
-        return session.getMessageProducer();
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.config;
-
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Configuration;
-
-@Configuration
-public class SolaceWorkerConfig {
-
-    @Value("$solace.notification.topic")
-    private String solaceNotificationTopic;
-
-    public SolaceWorkerConfig() {
-    }
-
-    public String getSolaceNotificationTopic() {
-        return solaceNotificationTopic;
-    }
-
-    public void setSolaceNotificationTopic(String solaceNotificationTopic) {
-        this.solaceNotificationTopic = solaceNotificationTopic;
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.converter;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.scb.scroeconnect.solaceworker.dto.SolacePayloadDTO;
-import jakarta.persistence.AttributeConverter;
-import jakarta.persistence.Converter;
-
-@Converter(autoApply = false)
-public class SolacePayloadConverter implements AttributeConverter<SolacePayloadDTO, String> {
-
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-    @Override
-    public String convertToDatabaseColumn(SolacePayloadDTO emailPayloadDTO) {
-        if (emailPayloadDTO == null) return null;
-        try {
-            return OBJECT_MAPPER.writeValueAsString(emailPayloadDTO);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Failed to serialize SolacePayloadDTO", e);
-        }
-    }
-
-    @Override
-    public SolacePayloadDTO convertToEntityAttribute(String emailData) {
-        if (emailData == null) return null;
-        try {
-            return OBJECT_MAPPER.readValue(emailData, SolacePayloadDTO.class);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Failed to deserialize EmailPayloadDTO", e);
-        }
-    }
-}
-
 package com.scb.scroeconnect.solaceworker.dto;
 
 public class BodyDTO {
@@ -180,6 +58,109 @@ package com.scb.scroeconnect.solaceworker.dto;
 
 public class TrailerDTO {
     private String recordCount;
+}
+
+package com.scb.scroeconnect.solaceworker.entity;
+
+import com.scb.scroeconnect.solaceworker.converter.SolacePayloadConverter;
+import com.scb.scroeconnect.solaceworker.dto.SolacePayloadDTO;
+import jakarta.persistence.*;
+
+import java.util.Date;
+
+@Entity
+@Table(name = "connect_notification_delivery")
+public class ConnectNotificationDelivery {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
+    private Long id;
+
+    @Convert(converter = SolacePayloadConverter.class)
+    @Column(name = "transformed_payload", columnDefinition = "TEXT")
+    private SolacePayloadDTO transformedPayload;
+
+    @Column(name = "delivery_mode")
+    private String delivery_mode;
+
+    @Column(name = "status")
+    private String status;
+
+    @Column(name = "retry_count")
+    private int retryCount;
+
+    @Column(name = "available_at")
+    private Date available_at;
+
+    @Column(name = "updated_at")
+    private Date updated_at;
+
+    public ConnectNotificationDelivery() {
+    }
+
+    public ConnectNotificationDelivery(SolacePayloadDTO transformedPayload, String delivery_mode, String status) {
+        this.transformedPayload = transformedPayload;
+        this.delivery_mode = delivery_mode;
+        this.status = status;
+        this.available_at = new Date();
+        this.updated_at = new Date();
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getDelivery_mode() {
+        return delivery_mode;
+    }
+
+    public void setDelivery_mode(String delivery_mode) {
+        this.delivery_mode = delivery_mode;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public SolacePayloadDTO getTransformedPayload() {
+        return transformedPayload;
+    }
+
+    public void setTransformedPayload(SolacePayloadDTO transformedPayload) {
+        this.transformedPayload = transformedPayload;
+    }
+
+    public int getRetryCount() {
+        return retryCount;
+    }
+
+    public void setRetryCount(int retryCount) {
+        this.retryCount = retryCount;
+    }
+
+    public Date getAvailable_at() {
+        return available_at;
+    }
+
+    public void setAvailable_at(Date available_at) {
+        this.available_at = available_at;
+    }
+
+    public Date getUpdated_at() {
+        return updated_at;
+    }
+
+    public void setUpdated_at(Date updated_at) {
+        this.updated_at = updated_at;
+    }
 }
 
 package com.scb.scroeconnect.solaceworker.entity;
@@ -307,53 +288,6 @@ public enum DeliveryStatus {
     RETRY,
 }
 
-package com.scb.scroeconnect.solaceworker.poller;
-
-import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
-import com.scb.scroeconnect.solaceworker.service.SolaceWorkerService;
-import com.scb.scroeconnect.solaceworker.service.asyncservice.SolaceAsyncProcessorService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
-
-import java.util.List;
-
-@Log4j2
-@Component
-@RequiredArgsConstructor
-public class SolacePoller {
-
-    private static final Logger logger = LogManager.getLogger(SolacePoller.class);
-
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    private final SolaceAsyncProcessorService solaceAsyncProcessorService;
-    private static final int BATCH_SIZE = 10;
-
-    @Scheduled(fixedDelay = 10000)
-    public void pollAndProcessEmailDelivery() {
-        try {
-            logger.info("Fetching Pending Solace Deliveries");
-            List<ConnectNotificationDelivery> batch =
-                    connectNotificationDeliveryRepository.findPendingSolaceDeliveries(BATCH_SIZE);
-            if (batch.isEmpty()) {
-                return;
-            }
-            logger.info("Pending Solace Deliveries Values {}", batch);
-            for (ConnectNotificationDelivery delivery : batch) {
-                solaceAsyncProcessorService.processAsyncSolace(delivery);
-            }
-        } catch (Exception e) {
-            logger.error("Error while fetching Pending Solace Deliveries:", e);
-            throw new RuntimeException("Error while fetching Pending Solace Deliveries:", e);
-        }
-    }
-}
-
 package com.scb.scroeconnect.solaceworker.repository;
 
 import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
@@ -415,163 +349,4 @@ public interface ConnectSolaceConfigRepository extends JpaRepository<ConnectSola
 
     @Query(value = "SELECT topic, host, vpn, username, password FROM connect_solace_config WHERE active = 'Y'")
     Optional<ConnectSolaceConfig> findBySolaceInfoId();
-}
-
-package com.scb.scroeconnect.solaceworker.service.asyncservice;
-
-import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-//import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationSolaceInfo;
-import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.solaceworker.repository.*;
-import com.scb.scroeconnect.solaceworker.service.SolaceWorkerService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.springframework.scheduling.annotation.Async;
-import org.springframework.stereotype.Service;
-
-import java.util.Date;
-
-@Log4j2
-@Service
-@RequiredArgsConstructor
-public class SolaceAsyncProcessorService {
-
-    private static final Logger logger = LogManager.getLogger(SolaceAsyncProcessorService.class);
-
-    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
-//    private final ConnectNotificationSolaceInfoRepository connectNotificationSolaceInfoRepository;
-    private final SolaceWorkerService solaceWorkerService;
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-
-    @Async("solaceWorkerExecutor")
-    public void processAsyncSolace(ConnectNotificationDelivery delivery) {
-        try {
-            logger.info("Sending Solace Notification {}", delivery);
-            Long solaceConfigId = solaceWorkerService.sendSolaceNotification(delivery);
-            logger.info("Update Notification Status {}", delivery);
-            connectNotificationDeliveryRepository.markSent(delivery.getId(), DeliveryStatus.SENT.toString());
-//            try {
-//                ConnectNotificationSolaceInfo connectNotificationSolaceInfo =
-//                        new ConnectNotificationSolaceInfo(
-//                                connectSolaceConfigRepository.getReferenceById(solaceConfigId),
-//                                delivery.getTransformedPayload());
-//                connectNotificationSolaceInfoRepository.save(connectNotificationSolaceInfo);
-//            } catch (Exception ex) {
-//                logger.error("Error saving details in Connect Solace Info table:", ex);
-//                throw new RuntimeException("Error saving details in Connect Solace Info table:", ex);
-//            }
-        } catch (Exception ex) {
-            logger.error("Error while publishing to Solace:", ex);
-            handleFailure(delivery, ex);
-        }
-    }
-
-    private void handleFailure(ConnectNotificationDelivery delivery, Exception ex) {
-        int nextRetry = delivery.getRetryCount() + 1;
-        Date nextRetryTime = calculateBackoff(nextRetry);
-        connectNotificationDeliveryRepository.updateStatusAndRetryById(
-                delivery.getId(),
-                DeliveryStatus.RETRY.name(),
-                nextRetryTime
-        );
-    }
-
-    private Date calculateBackoff(int retryCount) {
-        long delaySeconds = (long) Math.pow(2, retryCount) * 60;
-        return new Date(System.currentTimeMillis() + delaySeconds * 1000);
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.service;
-
-import com.scb.scroeconnect.solaceworker.dto.SolacePayloadDTO;
-import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
-import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
-import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
-import com.solacesystems.jcsmp.*;
-import jakarta.transaction.Transactional;
-import lombok.extern.log4j.Log4j2;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.springframework.stereotype.Service;
-
-import java.util.Date;
-import java.util.UUID;
-
-@Log4j2
-@Service
-public class SolaceWorkerService {
-
-    private static final Logger logger = LogManager.getLogger(SolaceWorkerService.class);
-
-
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
-    private final XMLMessageProducer producer;
-
-
-    public SolaceWorkerService(ConnectSolaceConfigRepository connectSolaceConfigRepository, XMLMessageProducer producer, ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository) {
-        this.connectSolaceConfigRepository = connectSolaceConfigRepository;
-        this.producer = producer;
-        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
-    }
-
-    @Transactional
-    public Long sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery) {
-
-        ConnectNotificationDelivery delivery =
-                connectNotificationDeliveryRepository.findById(connectNotificationDelivery.getId())
-                        .orElseThrow(() -> new IllegalStateException("Delivery not found"));
-
-        logger.info("Get Transformed payload {}", delivery.getTransformedPayload());
-
-        // 🔒 Idempotency / retry safety
-        if (delivery.getTransformedPayload().getMessage_id() == null) {
-
-            String messageId = UUID.randomUUID().toString();
-            SolacePayloadDTO payload = delivery.getTransformedPayload();
-            if (payload == null) {
-                payload = new SolacePayloadDTO();
-            }
-
-            payload.setMessage_id(messageId);
-            payload.setInitiated_timestamp(new Date());
-
-            delivery.setTransformedPayload(payload);
-        }
-
-        logger.info("Get Final payload {}", delivery.getTransformedPayload());
-
-        try {
-            Long configId = publishToSolace(delivery);
-            return configId;
-
-        } catch (Exception ex) {
-            throw ex;
-        }
-    }
-
-    public Long publishToSolace(ConnectNotificationDelivery connectNotificationDelivery) {
-        try {
-            ConnectSolaceConfig connectSolaceConfig = connectSolaceConfigRepository.findBySolaceInfoId().orElseThrow(() -> new IllegalStateException("No Solace config topic found"));
-            String jsonPayload = connectNotificationDelivery.getTransformedPayload().toString();
-            TextMessage message = JCSMPFactory.onlyInstance().createMessage(TextMessage.class);
-
-            message.setText(jsonPayload);
-            message.setDeliveryMode(DeliveryMode.PERSISTENT);
-            message.setApplicationMessageId(connectNotificationDelivery.getTransformedPayload().getMessage_id());
-
-            message.setHTTPContentType("application/json");
-
-            Topic topic = JCSMPFactory.onlyInstance().createTopic(connectSolaceConfig.getTopic());
-
-            producer.send(message, topic);
-            return connectSolaceConfig.getSolaceConfigId();
-        } catch (Exception ex) {
-            throw new RuntimeException("Solace publish failed", ex);
-        }
-    }
 }
