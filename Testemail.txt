@@ -1,374 +1,577 @@
-package com.scb.scroeconnect.emailworker.entity;
+package com.scb.scroeconnect.solaceworker.config;
 
-import com.scb.scroeconnect.emailworker.converter.EmailPayloadConverter;
-import com.scb.scroeconnect.emailworker.dto.EmailPayloadDTO;
-import jakarta.persistence.*;
-
-import java.sql.Timestamp;
-
-@Entity
-@Table(name = "connect_notification_delivery")
-public class ConnectNotificationDelivery {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "id")
-    private Long id;
-
-//    @ManyToOne(fetch = FetchType.LAZY)
-//    @JoinColumn(name = "recipient_id", referencedColumnName = "id", nullable = false)
-    @Column(name = "recipient_id")
-    private Long recipientId;
-
-    @Column(name = "delivery_mode", nullable = false)
-    private String deliveryMode;
-
-    @Convert(converter = EmailPayloadConverter.class)
-    @Column(name = "transformed_payload", columnDefinition = "TEXT")
-    private EmailPayloadDTO transformedPayload;
-
-    @Column(nullable = false)
-    private String status;
-
-    @Column(name = "retry_count", nullable = false)
-    private int retryCount;
-
-    @Column(name = "available_at", nullable = false)
-    private Timestamp availableAt;
-
-    public ConnectNotificationDelivery() {
-    }
-
-    public ConnectNotificationDelivery(Long recipientId, String deliveryMode, EmailPayloadDTO transformedPayload, String status, int retryCount, Timestamp availableAt) {
-        this.recipientId = recipientId;
-        this.deliveryMode = deliveryMode;
-        this.transformedPayload = transformedPayload;
-        this.status = status;
-        this.retryCount = retryCount;
-        this.availableAt = availableAt;
-    }
-
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public Long getRecipientId() {
-        return recipientId;
-    }
-
-    public void setRecipientId(Long recipientId) {
-        this.recipientId = recipientId;
-    }
-
-    public String getDeliveryMode() {
-        return deliveryMode;
-    }
-
-    public void setDeliveryMode(String deliveryMode) {
-        this.deliveryMode = deliveryMode;
-    }
-
-    public EmailPayloadDTO getTransformedPayload() {
-        return transformedPayload;
-    }
-
-    public void setTransformedPayload(EmailPayloadDTO transformedPayload) {
-        this.transformedPayload = transformedPayload;
-    }
-
-    public String getStatus() {
-        return status;
-    }
-
-    public void setStatus(String status) {
-        this.status = status;
-    }
-
-    public int getRetryCount() {
-        return retryCount;
-    }
-
-    public void setRetryCount(int retryCount) {
-        this.retryCount = retryCount;
-    }
-
-    public Timestamp getAvailableAt() {
-        return availableAt;
-    }
-
-    public void setAvailableAt(Timestamp availableAt) {
-        this.availableAt = availableAt;
-    }
-}
-
-package com.scb.scroeconnect.emailworker.entity;
-
-import com.scb.scroeconnect.emailworker.converter.StringListConverter;
-import jakarta.persistence.*;
-
-import java.util.List;
-
-@Entity
-@Table(name = "connect_event_email_config")
-public class ConnectEventEmailConfig {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "email_config_id")
-    private int email_config_id;
-
-    @Column(name = "recipients")
-    @Convert(converter = StringListConverter.class)
-    private List<String> recipients;
-
-    @Column(name = "cc")
-    @Convert(converter = StringListConverter.class)
-    private List<String> cc;
-
-    @Column(name = "bcc")
-    @Convert(converter = StringListConverter.class)
-    private List<String> bcc;
-
-    @Column(name = "reply_to")
-    private String replyTo;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "recipient_id", referencedColumnName = "id", nullable = false)
-    private ConnectNotificationRecipient recipient;
-
-    public ConnectEventEmailConfig(int email_config_id, List<String> recipients, List<String> cc, List<String> bcc, String replyTo) {
-        this.email_config_id = email_config_id;
-        this.recipients = recipients;
-        this.cc = cc;
-        this.bcc = bcc;
-        this.replyTo = replyTo;
-    }
-
-    public int getEmail_config_id() {
-        return email_config_id;
-    }
-
-    public void setEmail_config_id(int email_config_id) {
-        this.email_config_id = email_config_id;
-    }
-
-    public List<String> getRecipients() {
-        return recipients;
-    }
-
-    public void setRecipients(List<String> recipients) {
-        this.recipients = recipients;
-    }
-
-    public List<String> getCc() {
-        return cc;
-    }
-
-    public void setCc(List<String> cc) {
-        this.cc = cc;
-    }
-
-    public List<String> getBcc() {
-        return bcc;
-    }
-
-    public void setBcc(List<String> bcc) {
-        this.bcc = bcc;
-    }
-
-    public String getReplyTo() {
-        return replyTo;
-    }
-
-    public void setReplyTo(String replyTo) {
-        this.replyTo = replyTo;
-    }
-
-    public ConnectNotificationRecipient getRecipient() {
-        return recipient;
-    }
-
-    public void setRecipient(ConnectNotificationRecipient recipient) {
-        this.recipient = recipient;
-    }
-}
-
-package com.scb.scroeconnect.emailworker.dto;
-
-import com.fasterxml.jackson.databind.JsonNode;
-
-import java.util.List;
-
-public class EmailRequestDTO {
-    private String _id;
-    private String country;
-    private List<String> recipients;
-    private List<String> cc;
-    private List<String> bcc;
-    private String replyTo;
-    private String notificationType;
-    private String subject;
-    private String contentType;
-    private String contentBody;
-    private String encoding;
-    private String priority;
-    private List<Object> attachments;
-
-    public EmailRequestDTO() {
-    }
-
-    public String get_id() {
-        return _id;
-    }
-
-    public void set_id(String _id) {
-        this._id = _id;
-    }
-
-    public String getCountry() {
-        return country;
-    }
-
-    public void setCountry(String country) {
-        this.country = country;
-    }
-
-    public List<String> getRecipients() {
-        return recipients;
-    }
-
-    public void setRecipients(List<String> recipients) {
-        this.recipients = recipients;
-    }
-
-    public List<String> getCc() {
-        return cc;
-    }
-
-    public void setCc(List<String> cc) {
-        this.cc = cc;
-    }
-
-    public List<String> getBcc() {
-        return bcc;
-    }
-
-    public void setBcc(List<String> bcc) {
-        this.bcc = bcc;
-    }
-
-    public String getReplyTo() {
-        return replyTo;
-    }
-
-    public void setReplyTo(String replyTo) {
-        this.replyTo = replyTo;
-    }
-
-    public String getNotificationType() {
-        return notificationType;
-    }
-
-    public void setNotificationType(String notificationType) {
-        this.notificationType = notificationType;
-    }
-
-    public String getSubject() {
-        return subject;
-    }
-
-    public void setSubject(String subject) {
-        this.subject = subject;
-    }
-
-    public String getContentType() {
-        return contentType;
-    }
-
-    public void setContentType(String contentType) {
-        this.contentType = contentType;
-    }
-
-    public String getContentBody() {
-        return contentBody;
-    }
-
-    public void setContentBody(String contentBody) {
-        this.contentBody = contentBody;
-    }
-
-    public String getEncoding() {
-        return encoding;
-    }
-
-    public void setEncoding(String encoding) {
-        this.encoding = encoding;
-    }
-
-    public String getPriority() {
-        return priority;
-    }
-
-    public void setPriority(String priority) {
-        this.priority = priority;
-    }
-
-    public List<Object> getAttachments() {
-        return attachments;
-    }
-
-    public void setAttachments(List<Object> attachments) {
-        this.attachments = attachments;
-    }
-}
-
-package com.scb.scroeconnect.emailworker.config;
-
-import com.scb.scroeconnect.emailworker.exception.RetryableApiException;
-import lombok.extern.log4j.Log4j2;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.retry.annotation.EnableRetry;
-import org.springframework.retry.annotation.Recover;
-import org.springframework.retry.annotation.Retryable;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-@EnableRetry
+import java.util.concurrent.Executor;
+
 @Configuration
+@EnableAsync
+@EnableScheduling
+public class AsyncSolaceConfig {
+    @Bean("solaceWorkerExecutor")
+    public Executor emailWorkerExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(10);
+        executor.setMaxPoolSize(20);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("solace-worker-async");
+        executor.initialize();
+        return executor;
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.config;
+
+import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
+import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
+import com.solacesystems.jcsmp.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.Optional;
+
+@Configuration
+public class SolaceConnectionConfig {
+
+    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
+
+    public SolaceConnectionConfig(ConnectSolaceConfigRepository connectSolaceConfigRepository) {
+        this.connectSolaceConfigRepository = connectSolaceConfigRepository;
+    }
+
+    @Bean
+    public JCSMPSession jcsmpSession() throws JCSMPException {
+        Optional<ConnectSolaceConfig> connectSolaceConfig = connectSolaceConfigRepository.findBySolaceInfoId();
+        JCSMPProperties props = new JCSMPProperties();
+        props.setProperty(JCSMPProperties.HOST, connectSolaceConfig.get().getHost());
+        props.setProperty(JCSMPProperties.VPN_NAME, connectSolaceConfig.get().getVpn());
+        props.setProperty(JCSMPProperties.USERNAME, connectSolaceConfig.get().getUsername());
+        props.setProperty(JCSMPProperties.PASSWORD, connectSolaceConfig.get().getPassword());
+
+        JCSMPSession session = JCSMPFactory.onlyInstance().createSession(props);
+        session.connect();
+
+        return session;
+    }
+
+    @Bean
+    public XMLMessageProducer solaceProducer(JCSMPSession session) throws JCSMPException {
+        return session.getMessageProducer();
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.config;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class SolaceWorkerConfig {
+
+    @Value("$solace.notification.topic")
+    private String solaceNotificationTopic;
+
+    public SolaceWorkerConfig() {
+    }
+
+    public String getSolaceNotificationTopic() {
+        return solaceNotificationTopic;
+    }
+
+    public void setSolaceNotificationTopic(String solaceNotificationTopic) {
+        this.solaceNotificationTopic = solaceNotificationTopic;
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.converter;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scb.scroeconnect.solaceworker.dto.SolacePayloadDTO;
+import jakarta.persistence.AttributeConverter;
+import jakarta.persistence.Converter;
+
+@Converter(autoApply = false)
+public class SolacePayloadConverter implements AttributeConverter<SolacePayloadDTO, String> {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    @Override
+    public String convertToDatabaseColumn(SolacePayloadDTO emailPayloadDTO) {
+        if (emailPayloadDTO == null) return null;
+        try {
+            return OBJECT_MAPPER.writeValueAsString(emailPayloadDTO);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to serialize SolacePayloadDTO", e);
+        }
+    }
+
+    @Override
+    public SolacePayloadDTO convertToEntityAttribute(String emailData) {
+        if (emailData == null) return null;
+        try {
+            return OBJECT_MAPPER.readValue(emailData, SolacePayloadDTO.class);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to deserialize EmailPayloadDTO", e);
+        }
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.dto;
+
+public class BodyDTO {
+    private String physicalAccountNbr;
+    private String iban;
+    private String accountCurrency;
+    private String accountCountry;
+    private String vaNumber;
+    private String vaultNbr;
+    private String amount;
+    private String crDrIndicator;
+    private String txnDate;
+    private String cbValueDate;
+    private String sourceChannelId;
+    private String txnReferenceNo;
+    private String relatedReferenceNo;
+    private String rtatransID;
+    private String appSeqNo;
+    private String narration_1;
+    private String narration_2;
+    private String narration_3;
+    private String narration_4;
+    private String narration_5;
+    private String narration_6;
+
+}
+
+package com.scb.scroeconnect.solaceworker.dto;
+
+public class HeaderDTO {
+    private String notificationType;
+}
+
+package com.scb.scroeconnect.solaceworker.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.Date;
+import java.util.List;
+
+@Data
+@AllArgsConstructor
+public class SolacePayloadDTO {
+    private String message_id;
+    private HeaderDTO header;
+    private List<BodyDTO> body;
+    private TrailerDTO trailer;
+    private Date initiated_timestamp;
+
+    public SolacePayloadDTO() {
+    }
+
+}
+
+package com.scb.scroeconnect.solaceworker.dto;
+
+public class TrailerDTO {
+    private String recordCount;
+}
+
+package com.scb.scroeconnect.solaceworker.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+import java.util.Date;
+
+@Entity
+@Table(name = "connect_solace_config")
+public class ConnectSolaceConfig {
+
+    @Id
+    @Column(name = "solace_config_id", nullable = false)
+    private Long solaceConfigId;
+
+    @Column(name = "host", nullable = false)
+    private String host;
+
+    @Column(name = "topic", nullable = false)
+    private String topic;
+
+    @Column(name = "vpn", nullable = false)
+    private String vpn;
+
+    @Column(name = "username", nullable = false)
+    private String username;
+
+    @Column(name = "password", nullable = false)
+    private String password;
+
+    @Column(name = "active", nullable = false)
+    private String active;
+
+    @Column(name = "created_at", nullable = false)
+    private Date createdAt;
+
+    @Column(name = "updated_at")
+    private Date updatedAt;
+
+    public ConnectSolaceConfig() {
+    }
+
+    public Long getSolaceConfigId() {
+        return solaceConfigId;
+    }
+
+    public void setSolaceConfigId(Long solaceConfigId) {
+        this.solaceConfigId = solaceConfigId;
+    }
+
+    public String getHost() {
+        return host;
+    }
+
+    public void setHost(String host) {
+        this.host = host;
+    }
+
+    public String getTopic() {
+        return topic;
+    }
+
+    public void setTopic(String topic) {
+        this.topic = topic;
+    }
+
+    public Date getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Date createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public Date getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(Date updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
+    public String getActive() {
+        return active;
+    }
+
+    public void setActive(String active) {
+        this.active = active;
+    }
+
+    public String getVpn() {
+        return vpn;
+    }
+
+    public void setVpn(String vpn) {
+        this.vpn = vpn;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.enums;
+
+public enum DeliveryStatus {
+    PENDING,
+    SENT,
+    RETRY,
+}
+
+package com.scb.scroeconnect.solaceworker.poller;
+
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
+import com.scb.scroeconnect.solaceworker.service.SolaceWorkerService;
+import com.scb.scroeconnect.solaceworker.service.asyncservice.SolaceAsyncProcessorService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
 @Log4j2
-public class RetryableRestTemplate {
-    private final RestTemplate restTemplate;
+@Component
+@RequiredArgsConstructor
+public class SolacePoller {
 
-    public RetryableRestTemplate(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
+    private static final Logger logger = LogManager.getLogger(SolacePoller.class);
+
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+    private final SolaceAsyncProcessorService solaceAsyncProcessorService;
+    private static final int BATCH_SIZE = 10;
+
+    @Scheduled(fixedDelay = 10000)
+    public void pollAndProcessEmailDelivery() {
+        try {
+            logger.info("Fetching Pending Solace Deliveries");
+            List<ConnectNotificationDelivery> batch =
+                    connectNotificationDeliveryRepository.findPendingSolaceDeliveries(BATCH_SIZE);
+            if (batch.isEmpty()) {
+                return;
+            }
+            logger.info("Pending Solace Deliveries Values {}", batch);
+            for (ConnectNotificationDelivery delivery : batch) {
+                solaceAsyncProcessorService.processAsyncSolace(delivery);
+            }
+        } catch (Exception e) {
+            logger.error("Error while fetching Pending Solace Deliveries:", e);
+            throw new RuntimeException("Error while fetching Pending Solace Deliveries:", e);
+        }
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.repository;
+
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Date;
+import java.util.List;
+
+public interface ConnectNotificationDeliveryRepository extends JpaRepository<ConnectNotificationDelivery, Long> {
+
+    @Transactional
+    @Query(value = """
+            UPDATE connect_notification_delivery
+            SET status = 'PROCESSING',
+                updated_at = NOW()
+            WHERE id IN (
+                SELECT id
+                FROM notification_delivery
+                WHERE status IN ('PENDING', 'RETRY') :status
+                    AND delivery_mode = 'Solace'
+                    AND (available_at IS NULL OR available_at <= NOW())
+                ORDER BY id
+                FOR UPDATE SKIP LOCKED
+                LIMIT :batchSize
+            )
+            RETURNING id, event_id, recipient_id, template_id, final_payload, retry count
+            """, nativeQuery = true)
+    List<ConnectNotificationDelivery> findPendingSolaceDeliveries(@Param("batchSize") int batchSize);
+
+    @Modifying
+    @Transactional
+    @Query(value = "UPDATE connect_notification_delivery SET status = :status, " +
+            "retry_count = retry_count + 1, available_at = :availableAt, updated_at = NOW() WHERE id = :id")
+    void updateStatusAndRetryById(Long id, String status, Date availableAt);
+
+    @Modifying
+    @Transactional
+    @Query(value = "UPDATE connect_notification_delivery SET status = :status, " +
+            "updated_at = NOW() WHERE id = :id")
+    void markSent(Long id, String status);
+
+}
+
+package com.scb.scroeconnect.solaceworker.repository;
+
+import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface ConnectSolaceConfigRepository extends JpaRepository<ConnectSolaceConfig, Long> {
+
+    @Query(value = "SELECT topic, host, vpn, username, password FROM connect_solace_config WHERE active = 'Y'")
+    Optional<ConnectSolaceConfig> findBySolaceInfoId();
+}
+
+package com.scb.scroeconnect.solaceworker.service.asyncservice;
+
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+//import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationSolaceInfo;
+import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.solaceworker.repository.*;
+import com.scb.scroeconnect.solaceworker.service.SolaceWorkerService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+
+import java.util.Date;
+
+@Log4j2
+@Service
+@RequiredArgsConstructor
+public class SolaceAsyncProcessorService {
+
+    private static final Logger logger = LogManager.getLogger(SolaceAsyncProcessorService.class);
+
+    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
+//    private final ConnectNotificationSolaceInfoRepository connectNotificationSolaceInfoRepository;
+    private final SolaceWorkerService solaceWorkerService;
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+
+    @Async("solaceWorkerExecutor")
+    public void processAsyncSolace(ConnectNotificationDelivery delivery) {
+        try {
+            logger.info("Sending Solace Notification {}", delivery);
+            Long solaceConfigId = solaceWorkerService.sendSolaceNotification(delivery);
+            logger.info("Update Notification Status {}", delivery);
+            connectNotificationDeliveryRepository.markSent(delivery.getId(), DeliveryStatus.SENT.toString());
+//            try {
+//                ConnectNotificationSolaceInfo connectNotificationSolaceInfo =
+//                        new ConnectNotificationSolaceInfo(
+//                                connectSolaceConfigRepository.getReferenceById(solaceConfigId),
+//                                delivery.getTransformedPayload());
+//                connectNotificationSolaceInfoRepository.save(connectNotificationSolaceInfo);
+//            } catch (Exception ex) {
+//                logger.error("Error saving details in Connect Solace Info table:", ex);
+//                throw new RuntimeException("Error saving details in Connect Solace Info table:", ex);
+//            }
+        } catch (Exception ex) {
+            logger.error("Error while publishing to Solace:", ex);
+            handleFailure(delivery, ex);
+        }
     }
 
-    @Retryable(retryFor = RetryableApiException.class)
-    public ResponseEntity<String> exchange(String url, HttpMethod status, HttpEntity<?> requestEntity) {
-        return restTemplate.exchange(url, status, requestEntity, String.class);
+    private void handleFailure(ConnectNotificationDelivery delivery, Exception ex) {
+        int nextRetry = delivery.getRetryCount() + 1;
+        Date nextRetryTime = calculateBackoff(nextRetry);
+        connectNotificationDeliveryRepository.updateStatusAndRetryById(
+                delivery.getId(),
+                DeliveryStatus.RETRY.name(),
+                nextRetryTime
+        );
     }
 
-    @Retryable(retryFor = RetryableApiException.class)
-    public <T> ResponseEntity<T> getForEntity(String url, Class<T> responseObject) {
-        return restTemplate.getForEntity(url, responseObject);
+    private Date calculateBackoff(int retryCount) {
+        long delaySeconds = (long) Math.pow(2, retryCount) * 60;
+        return new Date(System.currentTimeMillis() + delaySeconds * 1000);
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.service;
+
+import com.scb.scroeconnect.solaceworker.dto.SolacePayloadDTO;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
+import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
+import com.solacesystems.jcsmp.*;
+import jakarta.transaction.Transactional;
+import lombok.extern.log4j.Log4j2;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.stereotype.Service;
+
+import java.util.Date;
+import java.util.UUID;
+
+@Log4j2
+@Service
+public class SolaceWorkerService {
+
+    private static final Logger logger = LogManager.getLogger(SolaceWorkerService.class);
+
+
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
+    private final XMLMessageProducer producer;
+
+
+    public SolaceWorkerService(ConnectSolaceConfigRepository connectSolaceConfigRepository, XMLMessageProducer producer, ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository) {
+        this.connectSolaceConfigRepository = connectSolaceConfigRepository;
+        this.producer = producer;
+        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
     }
 
-    @Recover
-    public ResponseEntity<String> recover(RetryableApiException r, String url, HttpMethod status, HttpEntity<?> requestEntity) {
-        return new ResponseEntity(r.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+    @Transactional
+    public Long sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery) {
+
+        ConnectNotificationDelivery delivery =
+                connectNotificationDeliveryRepository.findById(connectNotificationDelivery.getId())
+                        .orElseThrow(() -> new IllegalStateException("Delivery not found"));
+
+        logger.info("Get Transformed payload {}", delivery.getTransformedPayload());
+
+        // 🔒 Idempotency / retry safety
+        if (delivery.getTransformedPayload().getMessage_id() == null) {
+
+            String messageId = UUID.randomUUID().toString();
+            SolacePayloadDTO payload = delivery.getTransformedPayload();
+            if (payload == null) {
+                payload = new SolacePayloadDTO();
+            }
+
+            payload.setMessage_id(messageId);
+            payload.setInitiated_timestamp(new Date());
+
+            delivery.setTransformedPayload(payload);
+        }
+
+        logger.info("Get Final payload {}", delivery.getTransformedPayload());
+
+        try {
+            Long configId = publishToSolace(delivery);
+            return configId;
+
+        } catch (Exception ex) {
+            throw ex;
+        }
     }
 
-    @Recover
-    public ResponseEntity<String> recover(Exception e, String url, HttpMethod status, HttpEntity<?> requestEntity) {
-        log.error(requestEntity, e);
-        return new ResponseEntity(e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+    public Long publishToSolace(ConnectNotificationDelivery connectNotificationDelivery) {
+        try {
+            ConnectSolaceConfig connectSolaceConfig = connectSolaceConfigRepository.findBySolaceInfoId().orElseThrow(() -> new IllegalStateException("No Solace config topic found"));
+            String jsonPayload = connectNotificationDelivery.getTransformedPayload().toString();
+            TextMessage message = JCSMPFactory.onlyInstance().createMessage(TextMessage.class);
+
+            message.setText(jsonPayload);
+            message.setDeliveryMode(DeliveryMode.PERSISTENT);
+            message.setApplicationMessageId(connectNotificationDelivery.getTransformedPayload().getMessage_id());
+
+            message.setHTTPContentType("application/json");
+
+            Topic topic = JCSMPFactory.onlyInstance().createTopic(connectSolaceConfig.getTopic());
+
+            producer.send(message, topic);
+            return connectSolaceConfig.getSolaceConfigId();
+        } catch (Exception ex) {
+            throw new RuntimeException("Solace publish failed", ex);
+        }
     }
 }
