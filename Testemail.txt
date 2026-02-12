@@ -1,163 +1,165 @@
-package com.scb.scroeconnect.emailworker.service;
+package com.scb.scroeconnect.solaceworker.config;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.scb.scroeconnect.emailworker.config.EmailWorkerConfig;
-import com.scb.scroeconnect.emailworker.config.RetryableRestTemplate;
-import com.scb.scroeconnect.emailworker.dto.ContentBodyDTO;
-import com.scb.scroeconnect.emailworker.dto.EmailRequestDTO;
-import com.scb.scroeconnect.emailworker.dto.TransformedPayloadDTO;
-import com.scb.scroeconnect.emailworker.entity.ConnectEventEmailConfig;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.emailworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.emailworker.repository.ConnectEventEmailConfigRepository;
-import com.scb.scroeconnect.emailworker.repository.ConnectNotificationDeliveryRepository;
-//import com.scb.scroeconnect.emailworker.service.asyncservice.EmailAsyncProcessorService;
-import com.scb.scroeconnect.emailworker.util.RetryHandler;
-import com.scb.scroeconnect.emailworker.util.SaveFinalPayloadUtil;
-import jakarta.transaction.Transactional;
+import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
+import com.solacesystems.jcsmp.*;
+import com.solacesystems.jms.SolConnectionFactory;
+import com.solacesystems.jms.SolJmsUtility;
+import com.solacesystems.jms.message.SolMessage;
 import lombok.extern.log4j.Log4j2;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.*;
-import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationListener;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.Optional;
-import java.util.UUID;
+import javax.jms.Connection;
+import javax.jms.Destination;
+import javax.jms.JMSException;
+import javax.jms.MessageProducer;
+import javax.jms.Session;
+import java.util.Map;
 
 @Log4j2
-@Service
-public class EmailWorkerService {
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-    private static final Logger logger = LogManager.getLogger(EmailWorkerService.class);
+@Component
+public class SolaceConnectionConfig implements ApplicationListener<ContextClosedEvent> {
 
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    private final ConnectEventEmailConfigRepository connectEventEmailConfigRepository;
-    private final RetryableRestTemplate restTemplate;
-    private final EmailWorkerConfig emailWorkerConfig;
+    private final ConnectSolaceConfig connectSolaceConfig;
 
+    private final SolacePropertiesConstant solacePropertiesConstant;
+
+    @Lazy
     @Autowired
-    private final RetryHandler retryHandler;
+    @Qualifier("rcmsSession")
+    private Session session;
 
-    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
+    @Lazy
+    @Autowired
+    @Qualifier("rcmsConnection")
+    private Connection connection;
 
-   // private final EmailAsyncProcessorService emailAsyncProcessorService;
-
-    public EmailWorkerService(ConnectEventEmailConfigRepository connectEventEmailConfigRepository, RetryableRestTemplate restTemplate, EmailWorkerConfig emailWorkerConfig, ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository,RetryHandler retryHandler, SaveFinalPayloadUtil saveFinalPayloadUtil) {
-        this.connectEventEmailConfigRepository = connectEventEmailConfigRepository;
-        this.restTemplate = restTemplate;
-        this.emailWorkerConfig = emailWorkerConfig;
-        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
-        //this.emailAsyncProcessorService = emailAsyncProcessorService;
-        this.retryHandler=retryHandler;
-        this.saveFinalPayloadUtil=saveFinalPayloadUtil;
-
+    public SolaceConnectionConfig(ConnectSolaceConfig connectSolaceConfig, SolacePropertiesConstant solacePropertiesConstant) {
+        this.connectSolaceConfig = connectSolaceConfig;
+        this.solacePropertiesConstant = solacePropertiesConstant;
     }
 
-    @Transactional
-    public void sendEmailNotification(ConnectNotificationDelivery connectNotificationDelivery) throws JsonProcessingException {
-        logger.info("Processing email notification for delivery ID: {}", connectNotificationDelivery.getId());
+    @Bean("rcmsSolConnectionFactory")
+    public SolConnectionFactory createSolConnectionFactory() throws Exception {
+        Map<String, String> queue = solacePropertiesConstant.getQueue();
+        Map<String, String> ssl = solacePropertiesConstant.getSsl();
 
-        // Get the final payload
-        EmailRequestDTO finalPayload = getFinalPayload(connectNotificationDelivery);
+        SolConnectionFactory cf = SolJmsUtility.createConnectionFactory();
+        cf.setVPN(connectSolaceConfig.getVpn());
+        cf.setHost(connectSolaceConfig.getHostname());
+        cf.setUsername(connectSolaceConfig.getUsername());
+        cf.setPassword(connectSolaceConfig.getPassword());
+        cf.setConnectRetries(solacePropertiesConstant.getConnectRetries());
+        cf.setConnectRetriesPerHost(solacePropertiesConstant.getConnectRetriesPerHost());
+        cf.setConnectTimeoutInMillis(solacePropertiesConstant.getConnectTimeoutInMillis());
+        cf.setClientID(connectSolaceConfig.getClientId());
 
-        // Send the email
-        boolean emailSent = sendEmail(finalPayload,connectNotificationDelivery.getNotificationEvent().getEventId());
-        if (emailSent) {
-            logger.info("Email sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
-            connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
-            saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery,finalPayload);
-        } else {
-            logger.warn("Failed to send email for delivery ID: {}", connectNotificationDelivery.getId());
-            retryHandler.handleFailure(connectNotificationDelivery);
-
-        }
+        cf.setSSLTrustStore(ssl.get("truststorePath"));
+        cf.setSSLTrustStorePassword(ssl.get("truststorePassword"));
+        cf.setSSLTrustStoreFormat(ssl.get("truststoreType"));
+        cf.setSSLKeyStore(ssl.get("keystorePath"));
+        cf.setSSLKeyStorePassword(ssl.get("keystorePassword"));
+        cf.setSSLKeyStoreFormat(ssl.get("keystoreType"));
+        cf.setAuthenticationScheme("AUTHENTICATION_SCHEME_CLIENT_CERTIFICATE");
+        return cf;
     }
 
-    public EmailRequestDTO getFinalPayload(ConnectNotificationDelivery delivery) throws JsonProcessingException {
-        logger.info("Generating final payload for delivery ID: {}", delivery.getId());
-
-        // Deserialize transformedPayload into TransformedPayloadDTO
-        String transformedPayload = delivery.getTransformedPayload();
-        if (transformedPayload == null) {
-            throw new IllegalStateException("Transformed payload is null");
-        }
-        TransformedPayloadDTO payload = OBJECT_MAPPER.readValue(transformedPayload, TransformedPayloadDTO.class);
-
-        // Retrieve email configuration
-        Optional<ConnectEventEmailConfig> connectEventEmailConfigOptional = connectEventEmailConfigRepository.findByRecipientId(delivery.getRecipient().getId());
-        if (connectEventEmailConfigOptional.isEmpty()) {
-            throw new IllegalStateException("No email configuration found for recipient ID: " + delivery.getRecipient().getId());
-        }
-        ConnectEventEmailConfig connectEventEmailConfig = connectEventEmailConfigOptional.get();
-
-        // Extract contentBody from TransformedPayloadDTO and encode as Base64
-        ContentBodyDTO contentBodyDTO = payload.getContentBody();
-        String json = OBJECT_MAPPER.writeValueAsString(contentBodyDTO);
-        String contentBody = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
-
-        // Construct EmailRequestDTO
-        EmailRequestDTO finalPayload = new EmailRequestDTO();
-        finalPayload.set_id("2001");
-        finalPayload.setCountry(payload.getCountry());
-        finalPayload.setRecipients(connectEventEmailConfig.getRecipients());
-        finalPayload.setCc(connectEventEmailConfig.getCc());
-        finalPayload.setBcc(connectEventEmailConfig.getBcc());
-        finalPayload.setReplyTo(connectEventEmailConfig.getReplyTo());
-        finalPayload.setNotificationType(payload.getNotificationType());
-        finalPayload.setSubject(payload.getSubject());
-        finalPayload.setContentType(payload.getContentType());
-        finalPayload.setContentBody(contentBody);
-        finalPayload.setEncoding("Base64");
-        finalPayload.setPriority(payload.getPriority());
-        finalPayload.setAttachments(null); // For now
-
-        // Remove null fields
-        removeNullFields(finalPayload);
-
-        logger.info("Generated final payload: {}", finalPayload);
-        return finalPayload;
+    @Bean("rcmsConnection")
+    public Connection createConnection(@Qualifier("rcmsSolConnectionFactory") SolConnectionFactory cf) throws Exception {
+        return cf.createConnection();
     }
 
-    private boolean sendEmail(EmailRequestDTO finalPayload, UUID trackingId) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("TrackingId", trackingId.toString());
-
-        HttpEntity<EmailRequestDTO> requestEntity = new HttpEntity<>(finalPayload, headers);
-        ResponseEntity<String> response = restTemplate.exchange(
-                    emailWorkerConfig.getSendEmailApi(),
-                    HttpMethod.POST,
-                    requestEntity);
-        System.out.println(finalPayload.toString());
-        if (!response.getStatusCode().is2xxSuccessful()) {
-            log.error("Failed to send email. Response: {}", response.getBody());
-            //throw new RuntimeException("Failed to send email");
-            return false;
-        }
-        return true;
-
+    @Bean("rcmsSession")
+    public javax.jms.Session createSession(@Qualifier("rcmsConnection") Connection connection) throws Exception {
+        return connection.createSession(false, javax.jms.Session.CLIENT_ACKNOWLEDGE);
     }
 
-    private void removeNullFields(EmailRequestDTO finalPayload) {
-        try {
-            ObjectNode objectNode = OBJECT_MAPPER.valueToTree(finalPayload);
+    @Override
+    public void onApplicationEvent(ContextClosedEvent event) {
+        if (session != null)
+            try {
+                session.close();
+            } catch (JMSException e) {
+                log.error("Error while closing session", e);
+            }
+        if (connection != null)
+            try {
+                connection.close();
+            } catch (JMSException e) {
+                log.error("Error while closing connection", e);
+            }
+    }
 
-            // Remove all fields with null values
-            objectNode.fields().forEachRemaining(entry -> {
-                if (entry.getValue().isNull()) {
-                    objectNode.remove(entry.getKey());
-                }
-            });
-
-            // Update the finalPayload object with the modified ObjectNode
-            OBJECT_MAPPER.readerForUpdating(finalPayload).readValue(objectNode);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to remove null fields", e);
-        }
+    public void sendMessage(String topicName, String message, String caseRef) throws JMSException {
+        Destination destination = session.createTopic(topicName);
+        MessageProducer producer = session.createProducer(destination);
+        SolMessage textMessage = (SolMessage) session.createTextMessage((String) message);
+        textMessage.setJMSTimestamp(System.currentTimeMillis());
+        textMessage.setJMSCorrelationID(caseRef);
+        producer.send(textMessage);
+        log.info(textMessage.getJMSMessageID());
+        if (producer != null) producer.close();
     }
 }
+
+package com.scb.scroeconnect.solaceworker.entity;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@Entity
+@Table(name = "connect_solace_config")
+@Getter
+@Setter
+@AllArgsConstructor
+@NoArgsConstructor
+public class ConnectSolaceConfig extends BaseEntity {
+    @Id
+    @Column(name = "solace_config_id", nullable = false)
+    private Long solaceConfigId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "recipient_id",referencedColumnName = "id", nullable = false)
+    private Recipient recipient;
+
+    @Column(name = "host", nullable = false)
+    private String hostname;
+
+    @Column(name = "topic", nullable = false)
+    private String topic;
+
+    @Column(name = "clientId", nullable = false)
+    private String clientId;
+
+    @Column(name = "vpn", nullable = false)
+    private String vpn;
+
+    @Column(name = "username", nullable = false)
+    private String username;
+
+    @Column(name = "password", nullable = false)
+    private String password;
+
+    @Column(name = "active", nullable = false)
+    private String active;
+}
+
+Description:
+
+Parameter 0 of constructor in com.scb.scroeconnect.solaceworker.config.SolaceConnectionConfig required a bean of type 'com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig' that could not be found.
+
+
+Action:
+
+Consider defining a bean of type 'com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig' in your configuration.
+
+
+Process finished with exit code 1
