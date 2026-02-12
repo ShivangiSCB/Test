@@ -1,466 +1,329 @@
-package com.scb.scroeconnect.emailworker.converter;
+The below is reference code:
+package com.scb.scroeconnect.posting.model.jsonMessage;
 
+import lombok.Builder;
+import lombok.Data;
+
+@Data
+@Builder
+public class MessageRequest {
+    private MessageHeader Header;
+    private MessageData Data;
+}
+
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.scb.scroeconnect.emailworker.dto.EmailRequestDTO;
-import jakarta.persistence.AttributeConverter;
-import jakarta.persistence.Converter;
-
-@Converter(autoApply = false)
-public class EmailRequestDTOConverter implements AttributeConverter<EmailRequestDTO, String> {
-
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-    @Override
-    public String convertToDatabaseColumn(EmailRequestDTO emailPayloadDTO) {
-        if (emailPayloadDTO == null) return null;
-        try {
-            return OBJECT_MAPPER.writeValueAsString(emailPayloadDTO);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Failed to serialize EmailPayloadDTO", e);
-        }
-    }
-
-    @Override
-    public EmailRequestDTO convertToEntityAttribute(String emailData) {
-        if (emailData == null) return null;
-        try {
-            return OBJECT_MAPPER.readValue(emailData, EmailRequestDTO.class);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Failed to deserialize EmailPayloadDTO", e);
-        }
-    }
-}
-
-package com.scb.scroeconnect.emailworker.repository;
-
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationEmailInfo;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
-@Repository
-public interface ConnectEmailInfoRepository extends JpaRepository<ConnectNotificationEmailInfo,Long> {
-}
-
-package com.scb.scroeconnect.emailworker.repository;
-
-import com.scb.scroeconnect.emailworker.entity.ConnectEventEmailConfig;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
-
-import java.util.Optional;
-
-@Repository
-public interface ConnectEventEmailConfigRepository extends JpaRepository<ConnectEventEmailConfig, Integer> {
-
-    @Query(value = "SELECT * " +
-            "FROM connect_event_email_config WHERE recipient_id = :recipient_id", nativeQuery = true)
-    Optional<ConnectEventEmailConfig> findByRecipientId(@Param("recipient_id") Long recipientId);
-
-}
-
-package com.scb.scroeconnect.emailworker.repository;
-
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
+import com.fasterxml.jackson.databind.ObjectWriter;
+import com.scb.scroeconnect.posting.configuration.RcmsSolaceMessageProducer;
+import com.scb.scroeconnect.posting.constants.SolacePropertiesConstant;
+import com.scb.scroeconnect.posting.entity.ClientSetupEntity;
+import com.scb.scroeconnect.posting.entity.VaMaintenanceEntity;
+import com.scb.scroeconnect.posting.entity.VaRequestStatusEntity;
+import com.scb.scroeconnect.posting.model.jsonMessage.MessageData;
+import com.scb.scroeconnect.posting.model.jsonMessage.MessageHeader;
+import com.scb.scroeconnect.posting.model.jsonMessage.MessageRequest;
+import com.scb.scroeconnect.posting.repository.VaRequestDao;
+import lombok.AllArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.jms.JMSException;
 
-import java.math.BigInteger;
-import java.util.Date;
+@Log4j2
+@Service
+@AllArgsConstructor
+public class CreateSolaceMessageRequest {
+
+    private final RcmsSolaceMessageProducer rcmsSolaceMessageProducer;
+    private final VaRequestDao vaRequestDao;
+    private final SolacePropertiesConstant solacePropertiesConstant;
+//function and class name should be same and as verb (done)
+    @Transactional
+    public void createSolaceMessageSender(VaRequestStatusEntity vaRequestStatusEntity) throws JsonProcessingException, JMSException {
+        ClientSetupEntity clientSetupEntity =  vaRequestStatusEntity.getVaMaintenanceEntity().getClientSetupEntity();
+        MessageRequest messageRequest = createJSONMessageRequest(vaRequestStatusEntity);
+
+        ObjectWriter ow = new ObjectMapper().writer();
+        String message = ow.writeValueAsString(messageRequest);
+        log.info("Json message : {}",message);
+//change application properties constant (done)
+        rcmsSolaceMessageProducer.sendMessage(solacePropertiesConstant.getTopic().replace("*",(clientSetupEntity.getCountry().equals("DF") ? "AE" : clientSetupEntity.getCountry()).toLowerCase()),message,vaRequestStatusEntity.getMsgSender());
+        VaRequestStatusEntity vam = updateVaMaintenanceEntity(vaRequestStatusEntity);
+        vaRequestDao.merge(vam);
+    }
+
+    public MessageRequest createJSONMessageRequest(VaRequestStatusEntity vaRequestStatusEntity){
+//message request can be returned directly as it is redundant (done)
+        ClientSetupEntity clientSetupEntity = vaRequestStatusEntity.getVaMaintenanceEntity().getClientSetupEntity();
+        VaMaintenanceEntity vaMaintenanceEntity = vaRequestStatusEntity.getVaMaintenanceEntity();
+        log.info("create Message request for VaMaintenanceEntity : {}",vaRequestStatusEntity.getVaMaintenanceEntity());
+        MessageHeader messageHeader = MessageHeader.builder()
+                .msgSender(vaRequestStatusEntity.getMsgSender())
+                .actionInd(vaRequestStatusEntity.getRequestType().getRequestType())
+                .country(clientSetupEntity.getCountry().equals("DF") ? "AE" : clientSetupEntity.getCountry())
+                .build();
+        MessageData messageData = MessageData.builder()
+                .clientId(clientSetupEntity.getVaPartA())
+                .finalVacc(vaMaintenanceEntity.getVaNumber())
+                .payorName(vaMaintenanceEntity.getVaName())
+                .build();
+        return MessageRequest.builder()
+                .Header(messageHeader)
+                .Data(messageData)
+                .build();
+    }
+
+
+But I need to update in my code:
+package com.scb.scroeconnect.solaceworker.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.solacesystems.jcsmp.DeliveryMode;
+import com.solacesystems.jcsmp.JCSMPFactory;
+import com.solacesystems.jcsmp.TextMessage;
+import com.solacesystems.jcsmp.Topic;
+import lombok.extern.log4j.Log4j2;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadHeaderDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
+import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
-
-@Repository
-public interface ConnectNotificationDeliveryRepository extends JpaRepository<ConnectNotificationDelivery, Long> {
-
-    @Transactional
-    @Query(value = """
-            WITH claimed AS (
-                        SELECT id
-                        FROM connect_notification_delivery
-                        WHERE(status = 'PENDING' OR status= 'RETRY')
-                        AND delivery_mode = 'Email'
-                        AND available_at <= NOW()
-                        ORDER BY created_at
-                        LIMIT :batchSize
-                        FOR UPDATE SKIP LOCKED
-                    )
-                    UPDATE connect_notification_delivery
-                    SET status = 'PROCESSING'
-                    WHERE id IN (SELECT id FROM claimed)
-                    RETURNING *
-            """, nativeQuery = true)
-    List<ConnectNotificationDelivery> findPendingEmailDeliveries(int batchSize);
-
-    @Modifying
-    @Transactional
-    @Query(value = "UPDATE connect_notification_delivery SET status = :status, " +
-            "retry_count = retry_count + 1, available_at = :availableAt, updated_at = NOW() WHERE id = :id", nativeQuery = true)
-    void updateStatusAndRetryById(Long id, String status, Date availableAt);
-
-    @Modifying
-    @Transactional
-    @Query(value = "UPDATE connect_notification_delivery SET status = :status, " +
-            "updated_at = NOW() WHERE id = :id", nativeQuery = true)
-    void updateStatusById(Long id, String status);
-
-//    @Modifying
-//    @Transactional
-//    @Query(value = "UPDATE connect_notification_delivery SET status = 'FAILED', " +
-//            "updated_at = NOW() WHERE id = :id", nativeQuery = true)
-//    void updateStatusById(Long id, String status);
-}
-
-package com.scb.scroeconnect.emailworker.repository;
-
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationEvent;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
-import java.math.BigInteger;
 import java.util.Optional;
 import java.util.UUID;
 
-@Repository
-public interface ConnectNotificationEventRepository extends JpaRepository<ConnectNotificationEvent, Long> {
-
-    Optional<ConnectNotificationEvent> findByEventId(UUID eventId);
-
-}
-
-package com.scb.scroeconnect.emailworker.repository;
-
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationRecipient;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
-@Repository
-public interface ConnectNotificationRecipientRepository extends JpaRepository<ConnectNotificationRecipient, Long> {
-}
-
-package com.scb.scroeconnect.emailworker.repository;
-
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationTemplate;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
-import java.math.BigInteger;
-
-@Repository
-public interface ConnectNotificationTemplateRepository extends JpaRepository<ConnectNotificationTemplate, Long> {
-
-}
-
-package com.scb.scroeconnect.emailworker.service.asyncservice;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationEmailInfo;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationEvent;
-import com.scb.scroeconnect.emailworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.emailworker.repository.*;
-import com.scb.scroeconnect.emailworker.service.EmailWorkerService;
-import com.scb.scroeconnect.emailworker.util.SaveFinalPayloadUtil;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Async;
-import org.springframework.stereotype.Service;
-import com.scb.scroeconnect.emailworker.util.RetryHandler;
-
-import java.util.Date;
-
-@Log4j2
-@RequiredArgsConstructor
-@Service
-public class EmailAsyncProcessorService {
-
-    private static final Logger logger = LogManager.getLogger(EmailAsyncProcessorService.class);
-
-    @Autowired
-    private final ConnectNotificationEventRepository connectNotificationEventRepository;
-    @Autowired
-    private final ConnectNotificationTemplateRepository connectNotificationTemplateRepository;
-    @Autowired
-    private final ConnectEventEmailConfigRepository connectEventEmailConfigRepository;
-
-    @Autowired
-    private final ConnectEmailInfoRepository connectEmailInfoRepository;
-
-    @Autowired
-    private final RetryHandler retryHandler;
-
-    @Autowired
-    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
-
-    private final EmailWorkerService emailWorkerService;
-
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-
-    @Async("emailWorkerExecutor")
-    public void processAsyncEmail(ConnectNotificationDelivery delivery) {
-        try {
-            logger.info("Sending Email Notification {}", delivery);
-            emailWorkerService.sendEmailNotification(delivery);
-            logger.info("Update Notification Status {}", delivery);
-            // Retrieve the ConnectNotificationEvent entity
-
-        } catch (Exception ex) {
-            logger.error("Error while sending email:", ex);
-            retryHandler.handleFailure(delivery);
-        }
-    }
-
-
-
-}
-
-package com.scb.scroeconnect.emailworker.service;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.scb.scroeconnect.emailworker.config.EmailWorkerConfig;
-import com.scb.scroeconnect.emailworker.config.RetryableRestTemplate;
-import com.scb.scroeconnect.emailworker.dto.ContentBodyDTO;
-import com.scb.scroeconnect.emailworker.dto.EmailRequestDTO;
-import com.scb.scroeconnect.emailworker.dto.TransformedPayloadDTO;
-import com.scb.scroeconnect.emailworker.entity.ConnectEventEmailConfig;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.emailworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.emailworker.repository.ConnectEventEmailConfigRepository;
-import com.scb.scroeconnect.emailworker.repository.ConnectNotificationDeliveryRepository;
-//import com.scb.scroeconnect.emailworker.service.asyncservice.EmailAsyncProcessorService;
-import com.scb.scroeconnect.emailworker.util.RetryHandler;
-import com.scb.scroeconnect.emailworker.util.SaveFinalPayloadUtil;
-import jakarta.transaction.Transactional;
-import lombok.extern.log4j.Log4j2;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.*;
-import org.springframework.stereotype.Service;
-
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.Optional;
-
 @Log4j2
 @Service
-public class EmailWorkerService {
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-    private static final Logger logger = LogManager.getLogger(EmailWorkerService.class);
+public class SolaceWorkerService {
 
+    private static final Logger logger = LogManager.getLogger(SolaceWorkerService.class);
+    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
     private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    private final ConnectEventEmailConfigRepository connectEventEmailConfigRepository;
-    private final RetryableRestTemplate restTemplate;
-    private final EmailWorkerConfig emailWorkerConfig;
-
-    @Autowired
-    private final RetryHandler retryHandler;
-
-    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
-
-   // private final EmailAsyncProcessorService emailAsyncProcessorService;
-
-    public EmailWorkerService(ConnectEventEmailConfigRepository connectEventEmailConfigRepository, RetryableRestTemplate restTemplate, EmailWorkerConfig emailWorkerConfig, ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository,RetryHandler retryHandler, SaveFinalPayloadUtil saveFinalPayloadUtil) {
-        this.connectEventEmailConfigRepository = connectEventEmailConfigRepository;
-        this.restTemplate = restTemplate;
-        this.emailWorkerConfig = emailWorkerConfig;
+    public SolaceWorkerService(ConnectSolaceConfigRepository connectSolaceConfigRepository, ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository) {
+        this.connectSolaceConfigRepository = connectSolaceConfigRepository;
         this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
-        //this.emailAsyncProcessorService = emailAsyncProcessorService;
-        this.retryHandler=retryHandler;
-        this.saveFinalPayloadUtil=saveFinalPayloadUtil;
-
     }
 
     @Transactional
-    public void sendEmailNotification(ConnectNotificationDelivery connectNotificationDelivery) throws JsonProcessingException {
-        logger.info("Processing email notification for delivery ID: {}", connectNotificationDelivery.getId());
-
-        // Get the final payload
-        EmailRequestDTO finalPayload = getFinalPayload(connectNotificationDelivery);
-
-        // Send the email
-        boolean emailSent = sendEmail(finalPayload);
-        if (emailSent) {
-            logger.info("Email sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
-            connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
-            saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery,finalPayload);
-        } else {
-            logger.warn("Failed to send email for delivery ID: {}", connectNotificationDelivery.getId());
-            retryHandler.handleFailure(connectNotificationDelivery);
-
+    public void sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery){
+        Optional<ConnectNotificationDelivery> delivery = connectNotificationDeliveryRepository.findById(connectNotificationDelivery.getId());
+        if (delivery.isEmpty()) {
+            logger.error("Delivery with ID {} not found", connectNotificationDelivery.getId());
+            throw new IllegalStateException("Delivery not found");
         }
-    }
 
-    public EmailRequestDTO getFinalPayload(ConnectNotificationDelivery delivery) throws JsonProcessingException {
-        logger.info("Generating final payload for delivery ID: {}", delivery.getId());
+        String transformedPayload = connectNotificationDelivery.getTransformedPayload();
+        TransformedPayloadDto payload = null ;
 
-        // Deserialize transformedPayload into TransformedPayloadDTO
-        String transformedPayload = delivery.getTransformedPayload();
-        if (transformedPayload == null) {
-            throw new IllegalStateException("Transformed payload is null");
-        }
-        TransformedPayloadDTO payload = OBJECT_MAPPER.readValue(transformedPayload, TransformedPayloadDTO.class);
-
-        // Retrieve email configuration
-        Optional<ConnectEventEmailConfig> connectEventEmailConfigOptional = connectEventEmailConfigRepository.findByRecipientId(delivery.getRecipient().getId());
-        if (connectEventEmailConfigOptional.isEmpty()) {
-            throw new IllegalStateException("No email configuration found for recipient ID: " + delivery.getRecipient().getId());
-        }
-        ConnectEventEmailConfig connectEventEmailConfig = connectEventEmailConfigOptional.get();
-
-        // Extract contentBody from TransformedPayloadDTO and encode as Base64
-        ContentBodyDTO contentBodyDTO = payload.getContentBody();
-        String json = OBJECT_MAPPER.writeValueAsString(contentBodyDTO);
-        String contentBody = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
-
-        // Construct EmailRequestDTO
-        EmailRequestDTO finalPayload = new EmailRequestDTO();
-        finalPayload.set_id("2001");
-        finalPayload.setCountry(payload.getCountry());
-        finalPayload.setRecipients(connectEventEmailConfig.getRecipients());
-        finalPayload.setCc(connectEventEmailConfig.getCc());
-        finalPayload.setBcc(connectEventEmailConfig.getBcc());
-        finalPayload.setReplyTo(connectEventEmailConfig.getReplyTo());
-        finalPayload.setNotificationType(payload.getNotificationType());
-        finalPayload.setSubject(payload.getSubject());
-        finalPayload.setContentType(payload.getContentType());
-        finalPayload.setContentBody(contentBody);
-        finalPayload.setEncoding("Base64");
-        finalPayload.setPriority(payload.getPriority());
-        finalPayload.setAttachments(null); // For now
-
-        // Remove null fields
-        removeNullFields(finalPayload);
-
-        logger.info("Generated final payload: {}", finalPayload);
-        return finalPayload;
-    }
-
-    private boolean sendEmail(EmailRequestDTO finalPayload) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-
-        HttpEntity<EmailRequestDTO> requestEntity = new HttpEntity<>(finalPayload, headers);
-        ResponseEntity<String> response = restTemplate.exchange(
-                    emailWorkerConfig.getSendEmailApi(),
-                    HttpMethod.POST,
-                    requestEntity);
-        System.out.println(finalPayload.toString());
-        if (!response.getStatusCode().is2xxSuccessful()) {
-            log.error("Failed to send email. Response: {}", response.getBody());
-            //throw new RuntimeException("Failed to send email");
-            return false;
-        }
-        return true;
-
-    }
-
-    private void removeNullFields(EmailRequestDTO finalPayload) {
         try {
-            ObjectNode objectNode = OBJECT_MAPPER.valueToTree(finalPayload);
 
-            // Remove all fields with null values
-            objectNode.fields().forEachRemaining(entry -> {
-                if (entry.getValue().isNull()) {
-                    objectNode.remove(entry.getKey());
-                }
-            });
+            ObjectMapper objectMapper = new ObjectMapper();
+            payload = objectMapper.readValue(transformedPayload, TransformedPayloadDto.class);
 
-            // Update the finalPayload object with the modified ObjectNode
-            OBJECT_MAPPER.readerForUpdating(finalPayload).readValue(objectNode);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to remove null fields", e);
+            System.out.println(payload.getBody());
+            System.out.println(payload.getHeader());
+
+        }catch (JsonProcessingException e){
+            logger.error("Error processing JSON: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to parse transformed payload", e);
         }
+
+        FinalPayloadDto finalPayload = new FinalPayloadDto();
+        FinalPayloadHeaderDto headerDto = new FinalPayloadHeaderDto();
+        FinalPayloadBodyDto bodyDto = new FinalPayloadBodyDto();
+
+        headerDto.setNotificationType(payload.getHeader().getNotificationType());
+        String messageId = UUID.randomUUID().toString();
+        headerDto.setMessageId(messageId);
+        headerDto.setInitiatedTimeStamp(LocalDateTime.now());
+        finalPayload.setHeader(headerDto);
+
+        TransformedBodyDto payloadBody = payload.getBody().get(0);
+
+        bodyDto.setPhysicalAccountNbr(payloadBody.getPhysicalAccountNbr());
+        bodyDto.setIban(payloadBody.getIban());
+        bodyDto.setAccountCurrency(payloadBody.getAccountCurrency());
+        bodyDto.setAccountCountry(payloadBody.getAccountCountry());
+        bodyDto.setVaNumber(payloadBody.getVaNumber());
+        bodyDto.setVaultNbr(payloadBody.getVaultNbr());
+        bodyDto.setAmount(new BigDecimal(payloadBody.getAmount()));
+        bodyDto.setCrDrIndicator(payloadBody.getCrDrIndicator());
+        bodyDto.setTxnDate(LocalDateTime.parse(payloadBody.getTxnDate()));
+        bodyDto.setCbValueDate(LocalDateTime.parse(payloadBody.getCbValueDate()));
+        bodyDto.setSourceChannelId(payloadBody.getSourceChannelId());
+        bodyDto.setTxnReferenceNo(payloadBody.getTxnReferenceNo());
+        bodyDto.setRelatedReferenceNo(payloadBody.getRelatedReferenceNo());
+        bodyDto.setRtatransID(payloadBody.getRtatransID());
+        bodyDto.setAppSeqNo(payloadBody.getAppSeqNo());
+        bodyDto.setNarration1(payloadBody.getNarration1());
+        bodyDto.setNarration2(payloadBody.getNarration2());
+        bodyDto.setNarration3(payloadBody.getNarration3());
+        bodyDto.setNarration4(payloadBody.getNarration4());
+        bodyDto.setNarration5(payloadBody.getNarration5());
+        bodyDto.setNarration6(payloadBody.getNarration6());
+        finalPayload.setBody(List.of(bodyDto));
+
+        Long recipientId = connectNotificationDelivery.getRecipient().getId();
+        String recipientRef = connectNotificationDelivery.getRecipient().getRecipientRef();
+
+        publishToSolace(finalPayload, recipientId);
+        logger.info("successfully publishedToSolace for recipientRef: {}, header: {}, body: {}", recipientRef, finalPayload.getHeader(), finalPayload.getBody());
     }
+
+
+    public Long publishToSolace( FinalPayloadDto finalPayload , Long recipientId) {
+
+        return 1L; // Return a dummy value for now
+
+    }
+
 }
 
-package com.scb.scroeconnect.emailworker.util;
+My dtos:
+package com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto;
 
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.emailworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.emailworker.repository.ConnectNotificationDeliveryRepository;
-import com.scb.scroeconnect.emailworker.service.asyncservice.EmailAsyncProcessorService;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+import lombok.Data;
 
-import java.util.Date;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
+@Data
+public class FinalPayloadBodyDto {
+    private String physicalAccountNbr;
+    private String iban;
+    private String accountCurrency;
+    private String accountCountry;
+    private String vaNumber;
+    private String vaultNbr;
+    private BigDecimal amount;
+    private String crDrIndicator;
+    private LocalDateTime txnDate;
 
-@Component
-public class RetryHandler {
+    private LocalDateTime cbValueDate;
+    private String sourceChannelId;
+    private String txnReferenceNo;
 
-    @Autowired
-    ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+    private String relatedReferenceNo;
+    private String rtatransID;
+    private String appSeqNo;
 
-    @Value("${app.worker.max-retries}")
-    private int maxRetries;
-    private static final Logger logger = LogManager.getLogger(EmailAsyncProcessorService.class);
-
-    public void handleFailure(ConnectNotificationDelivery delivery) {
-        int nextRetry = delivery.getRetryCount() + 1;
-        if (nextRetry > maxRetries) {
-            logger.error("Max retry limit reached for delivery ID: {}", delivery.getId());
-            connectNotificationDeliveryRepository.updateStatusById(delivery.getId(), DeliveryStatus.FAILED.name());
-            return;
-        }
-        Date nextRetryTime = calculateBackoff(nextRetry);
-        connectNotificationDeliveryRepository.updateStatusAndRetryById(delivery.getId(), DeliveryStatus.RETRY.name(), nextRetryTime);
-    }
-    public Date calculateBackoff(int retryCount) {
-        long delaySeconds = (long) Math.pow(2, retryCount) * 60;
-        return new Date(System.currentTimeMillis() + delaySeconds * 1000);
-    }
+    private String narration1;
+    private String narration2;
+    private String narration3;
+    private String narration4;
+    private String narration5;
+    private String narration6;
 }
 
-package com.scb.scroeconnect.emailworker.util;
+package com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.scb.scroeconnect.emailworker.dto.EmailRequestDTO;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationEmailInfo;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationEvent;
-import com.scb.scroeconnect.emailworker.repository.ConnectEmailInfoRepository;
-import com.scb.scroeconnect.emailworker.repository.ConnectNotificationEventRepository;
-import com.scb.scroeconnect.emailworker.service.EmailWorkerService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
+import lombok.Data;
+import com.scb.scroeconnect.solaceworker.dto.TrailerDto;
 
-@Component
-public class SaveFinalPayloadUtil
-{
-        @Autowired
-        private ConnectNotificationEventRepository connectNotificationEventRepository;
+import java.util.List;
 
-        @Autowired
-        private ConnectEmailInfoRepository connectEmailInfoRepository;
+@Data
+public class FinalPayloadDto {
 
-    public void saveFinalPayload(ConnectNotificationDelivery delivery, EmailRequestDTO finalPayload) throws JsonProcessingException {
-        ConnectNotificationEvent notificationEvent = connectNotificationEventRepository
-                .findByEventId(delivery.getNotificationEvent().getEventId())
-                .orElseThrow(() -> new RuntimeException("Event not found for ID: " + delivery.getNotificationEvent().getEventId()));
-
-        // Create and populate the ConnectNotificationEmailInfo entity
-        ConnectNotificationEmailInfo connectNotificationEmailInfo = new ConnectNotificationEmailInfo();
-        connectNotificationEmailInfo.setNotificationEvent(notificationEvent);
-        connectNotificationEmailInfo.setEmailPayload(finalPayload);
-        connectNotificationEmailInfo.setNotificationDelivery(delivery);
-
-        // Save the entity
-        connectEmailInfoRepository.save(connectNotificationEmailInfo);
-    }
+    private FinalPayloadHeaderDto header;
+    private List<FinalPayloadBodyDto> body;
+    private TrailerDto trailer;
 }
+
+package com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto;
+
+import lombok.Data;
+
+import java.time.LocalDateTime;
+
+@Data
+public class FinalPayloadHeaderDto {
+    private String notificationType;
+    private String messageId;
+    private LocalDateTime initiatedTimeStamp;
+}
+
+package com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto;
+
+import lombok.Data;
+
+@Data
+public class TransformedBodyDto {
+    private String clientId;
+    private String physicalAccountNbr;
+    private String iban;
+    private String accountCurrency;
+    private String accountCountry;
+    private String vaNumber;
+    private String vaultNbr;
+    private String amount;
+    private String crDrIndicator;
+    private String txnDate;
+
+    private String cbValueDate;
+    private String sourceChannelId;
+    private String txnReferenceNo;
+
+    private String relatedReferenceNo;
+    private String rtatransID;
+    private String appSeqNo;
+
+    private String narration1;
+    private String narration2;
+    private String narration3;
+    private String narration4;
+    private String narration5;
+    private String narration6;
+
+}
+
+package com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto;
+
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
+public class TransformedHeaderDto {
+    private String notificationType;
+}
+
+package com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto;
+
+import lombok.Data;
+import com.scb.scroeconnect.solaceworker.dto.TrailerDto;
+
+import java.util.List;
+
+@Data
+public class TransformedPayloadDto {
+
+    private TransformedHeaderDto header;
+    private List<TransformedBodyDto> body;
+    private TrailerDto trailer;
+}
+
+package com.scb.scroeconnect.solaceworker.dto;
+
+import lombok.Data;
+
+@Data
+public class TrailerDto {
+    private String recordCount;
+}
+
+Take reference from above code, but change the code according to my dtos and logic.
