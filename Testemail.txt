@@ -1,144 +1,154 @@
-package com.scb.scroeconnect.solaceworker.config;
+Write testcase for the following class with 100% line coverage no matter the result, But I want 100% line coverage.
 
-import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
-import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
-import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceWorkerRepository;
-import com.solacesystems.jcsmp.*;
-import com.solacesystems.jms.SolConnectionFactory;
-import com.solacesystems.jms.SolJmsUtility;
-import com.solacesystems.jms.message.SolMessage;
+package com.scb.scroeconnect.solaceworker.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectWriter;
+import com.scb.scroeconnect.solaceworker.config.SolaceConnectionConfig;
+import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.solaceworker.util.RetryHandler;
+import com.scb.scroeconnect.solaceworker.util.SaveFinalPayloadUtil;
 import lombok.extern.log4j.Log4j2;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadHeaderDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
+import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.ApplicationListener;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.context.event.ContextClosedEvent;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import javax.jms.Connection;
-import javax.jms.Destination;
-import javax.jms.JMSException;
-import javax.jms.MessageProducer;
-import javax.jms.Session;
-import java.util.Map;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 @Log4j2
-@Component
-public class SolaceConnectionConfig implements ApplicationListener<ContextClosedEvent> {
+@Service
+public class SolaceWorkerService {
 
+    private static final Logger logger = LogManager.getLogger(SolaceWorkerService.class);
     private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
-
-    private final SolacePropertiesConstant solacePropertiesConstant;
-
-    @Lazy
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+    private final SolaceConnectionConfig solaceConnectionConfig;
     @Autowired
-    @Qualifier("rcmsSession")
-    public Session session;
+    private final RetryHandler retryHandler;
 
-    @Lazy
-    @Autowired
-    @Qualifier("rcmsConnection")
-    public Connection connection;
+    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
 
-    public SolaceConnectionConfig(ConnectSolaceConfigRepository connectSolaceConfigRepository, SolacePropertiesConstant solacePropertiesConstant) {
+    public SolaceWorkerService(ConnectSolaceConfigRepository connectSolaceConfigRepository,
+                               ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository,
+                               SolaceConnectionConfig solaceConnectionConfig, SaveFinalPayloadUtil saveFinalPayloadUtil,
+                               RetryHandler retryHandler) {
         this.connectSolaceConfigRepository = connectSolaceConfigRepository;
-        this.solacePropertiesConstant = solacePropertiesConstant;
+        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
+        this.solaceConnectionConfig = solaceConnectionConfig;
+        this.retryHandler = retryHandler;
+        this.saveFinalPayloadUtil = saveFinalPayloadUtil;
+
     }
 
-    @Bean("rcmsSolConnectionFactory")
-    public SolConnectionFactory createSolConnectionFactory() throws Exception {
-        ConnectSolaceConfig connectSolaceConfig = connectSolaceConfigRepository.findFirstByActive("Y").orElseThrow(() -> new RuntimeException("No active Solace configuration found"));
-        Map<String, String> queue = solacePropertiesConstant.getQueue();
-        Map<String, String> ssl = solacePropertiesConstant.getSsl();
+    @Transactional
+    public void sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery) {
+        Optional<ConnectNotificationDelivery> delivery = connectNotificationDeliveryRepository.findById(connectNotificationDelivery.getId());
+        if (delivery.isEmpty()) {
+            logger.error("Delivery with ID {} not found", connectNotificationDelivery.getId());
+            throw new IllegalStateException("Delivery not found");
+        }
 
-        SolConnectionFactory cf = SolJmsUtility.createConnectionFactory();
-        cf.setVPN(connectSolaceConfig.getVpn());
-        cf.setHost(connectSolaceConfig.getHostname());
-        cf.setUsername(connectSolaceConfig.getUsername());
-        cf.setPassword(connectSolaceConfig.getPassword());
-        cf.setConnectRetries(solacePropertiesConstant.getConnectRetries());
-        cf.setConnectRetriesPerHost(solacePropertiesConstant.getConnectRetriesPerHost());
-        cf.setConnectTimeoutInMillis(solacePropertiesConstant.getConnectTimeoutInMillis());
-        cf.setClientID(connectSolaceConfig.getClientId());
+        String transformedPayload = connectNotificationDelivery.getTransformedPayload();
+        TransformedPayloadDto payload;
 
-        cf.setSSLTrustStore(ssl.get("truststorePath"));
-        cf.setSSLTrustStorePassword(ssl.get("truststorePassword"));
-        cf.setSSLTrustStoreFormat(ssl.get("truststoreType"));
-        cf.setSSLKeyStore(ssl.get("keystorePath"));
-        cf.setSSLKeyStorePassword(ssl.get("keystorePassword"));
-        cf.setSSLKeyStoreFormat(ssl.get("keystoreType"));
-        cf.setAuthenticationScheme("AUTHENTICATION_SCHEME_CLIENT_CERTIFICATE");
-        log.info("Host: {}", connectSolaceConfig.getHostname());
-        log.info("Sol Connection Properties: {}", cf.getHost());
-        return cf;
-    }
+        try {
 
-    @Bean("rcmsConnection")
-    public Connection createConnection(@Qualifier("rcmsSolConnectionFactory") SolConnectionFactory cf) throws Exception {
-        return cf.createConnection();
-    }
+            ObjectMapper objectMapper = new ObjectMapper();
+            payload = objectMapper.readValue(transformedPayload, TransformedPayloadDto.class);
 
-    @Bean("rcmsSession")
-    public javax.jms.Session createSession(@Qualifier("rcmsConnection") Connection connection) throws Exception {
-        return connection.createSession(false, javax.jms.Session.CLIENT_ACKNOWLEDGE);
-    }
+            logger.info(payload.getBody());
+            logger.info(payload.getHeader());
 
-    @Override
-    public void onApplicationEvent(ContextClosedEvent event) {
-        if (session != null)
-            try {
-                session.close();
-            } catch (JMSException e) {
-                log.error("Error while closing session", e);
+        } catch (JsonProcessingException e) {
+            logger.error("Error processing JSON: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to parse transformed payload", e);
+        }
+
+        try {
+            FinalPayloadDto finalPayload = new FinalPayloadDto();
+            FinalPayloadHeaderDto headerDto = new FinalPayloadHeaderDto();
+            FinalPayloadBodyDto bodyDto = new FinalPayloadBodyDto();
+
+            headerDto.setNotificationType(payload.getHeader().getNotificationType());
+            String messageId = UUID.randomUUID().toString();
+            headerDto.setMessageId(messageId);
+            headerDto.setInitiatedTimeStamp(LocalDateTime.now());
+            finalPayload.setHeader(headerDto);
+
+            TransformedBodyDto payloadBody = payload.getBody().get(0);
+
+            bodyDto.setPhysicalAccountNbr(payloadBody.getPhysicalAccountNbr());
+            bodyDto.setIban(payloadBody.getIban());
+            bodyDto.setAccountCurrency(payloadBody.getAccountCurrency());
+            bodyDto.setAccountCountry(payloadBody.getAccountCountry());
+            bodyDto.setVaNumber(payloadBody.getVaNumber());
+            bodyDto.setVaultNbr(payloadBody.getVaultNbr());
+            bodyDto.setAmount(new BigDecimal(payloadBody.getAmount()));
+            bodyDto.setCrDrIndicator(payloadBody.getCrDrIndicator());
+            bodyDto.setTxnDate(LocalDateTime.parse(payloadBody.getTxnDate()));
+            bodyDto.setCbValueDate(LocalDateTime.parse(payloadBody.getCbValueDate()));
+            bodyDto.setSourceChannelId(payloadBody.getSourceChannelId());
+            bodyDto.setTxnReferenceNo(payloadBody.getTxnReferenceNo());
+            bodyDto.setRelatedReferenceNo(payloadBody.getRelatedReferenceNo());
+            bodyDto.setRtatransID(payloadBody.getRtatransID());
+            bodyDto.setAppSeqNo(payloadBody.getAppSeqNo());
+            bodyDto.setNarration1(payloadBody.getNarration1());
+            bodyDto.setNarration2(payloadBody.getNarration2());
+            bodyDto.setNarration3(payloadBody.getNarration3());
+            bodyDto.setNarration4(payloadBody.getNarration4());
+            bodyDto.setNarration5(payloadBody.getNarration5());
+            bodyDto.setNarration6(payloadBody.getNarration6());
+            finalPayload.setBody(List.of(bodyDto));
+
+            Long recipientId = connectNotificationDelivery.getRecipient().getId();
+            boolean publish = publishToSolace(finalPayload, recipientId, connectNotificationDelivery.getNotificationEvent().getEventId());
+            if (publish) {
+                logger.info("Solace Notification sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
+                connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
+                saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery, finalPayload);
+
+            } else {
+                logger.error("Failed to send Solace Notification delivery ID: {}", connectNotificationDelivery.getId());
+                retryHandler.handleFailure(connectNotificationDelivery);
             }
-        if (connection != null)
-            try {
-                connection.close();
-            } catch (JMSException e) {
-                log.error("Error while closing connection", e);
-            }
+        } catch (Exception e) {
+            logger.error("Failed to send Solace Notification: {}", e.getMessage());
+            throw new RuntimeException("Failed to send Solace Notification: ", e);
+        }
     }
 
-    public void sendMessage(String topicName, String message, String caseRef) throws JMSException {
-        Destination destination = session.createTopic(topicName);
-        MessageProducer producer = session.createProducer(destination);
-        SolMessage textMessage = (SolMessage) session.createTextMessage((String) message);
-        textMessage.setJMSTimestamp(System.currentTimeMillis());
-        textMessage.setJMSCorrelationID(caseRef);
-        producer.send(textMessage);
-        log.info(textMessage.getJMSMessageID());
-        if (producer != null) producer.close();
+    public boolean publishToSolace(FinalPayloadDto finalPayload, Long recipientId, UUID eventId) {
+        try {
+            Optional<ConnectSolaceConfig> connectSolaceConfig = connectSolaceConfigRepository.findByRecipientIdAndActive(recipientId);
+            if (connectSolaceConfig.isEmpty()) {
+                logger.error("No active Solace configuration found for recipientId: {}", recipientId);
+                throw new IllegalStateException("No active Solace configuration found for recipientId: " + recipientId);
+            }
+            ObjectWriter ow = new ObjectMapper().writer();
+            String message = ow.writeValueAsString(finalPayload);
+            log.info("Solace Final Payload Message : {}", message);
+            solaceConnectionConfig.sendMessage(connectSolaceConfig.get().getTopic(), message, eventId.toString());
+            return true;
+        } catch (Exception e) {
+            logger.error("Exception while sending Solace Notification: {} For Recipient Id: {}", e, recipientId);
+            throw new RuntimeException("Exception while sending Solace Notification: " + e + "For Recipient Id: " + recipientId);
+        }
     }
+
 }
-
-#RCMS Solace configurations
-solace.rcms.queue.clientId=51241-xcro
-solace.rcms.queue.username=51241-xcro
-solace.rcms.queue.password=51241-xcro
-solace.rcms.queue.vpn=vpn-cs-reference-data-p1
-solace.rcms.queue.hostname=tcps://vpn-cs-reference-data-p1-0-a-0.51080.app.standardchartered.com:55443,tcps://vpn-cs-reference-data-p1-0-b-0.51080.app.standardchartered.com:55443
-solace.rcms.queue.connectionPrefix=scroe-rcms-conn-
-solace.rcms.queue.isSSLEnabled=Y
-solace.rcms.queue.cacheSize=3
-solace.rcms.ssl.truststoreType=jks
-solace.rcms.ssl.truststorePassword=51241-xcro
-solace.rcms.ssl.truststorePath=/etc/keys/51241-solace-truststore.jks
-solace.rcms.ssl.keystoreType=PKCS12
-solace.rcms.ssl.keystorePassword=51241-xcro
-solace.rcms.ssl.keystorePath=/etc/keys/51241-solace-keystore.jks
-solace.rcms.topic=v1/51241-scroe-/vam/json.vam.v1/*/req/14733-rcms-
-solace.rcms.connectRetries=5
-solace.rcms.connectRetriesPerHost=5
-solace.rcms.connectTimeoutInMillis=10000
-
-
-Caused by: org.springframework.beans.BeanInstantiationException: Failed to instantiate [javax.jms.Connection]: Factory method 'createConnection' threw exception with message: All hosts in the host list: 'tcps://vpn-cs-reference-data-p1-0-a-0.51080.app.standardchartered.com:55443,tcps://vpn-cs-reference-data-p1-0-b-0.51080.app.standardchartered.com:55443' are not resolvable
-	at org.springframework.beans.factory.support.SimpleInstantiationStrategy.instantiate(SimpleInstantiationStrategy.java:178) ~[spring-beans-6.1.21.jar:6.1.21]
-	at org.springframework.beans.factory.support.ConstructorResolver.instantiate(ConstructorResolver.java:644) ~[spring-beans-6.1.21.jar:6.1.21]
-	... 19 common frames omitted
-Caused by: com.solacesystems.jms.ConfigurationException: All hosts in the host list: 'tcps://vpn-cs-reference-data-p1-0-a-0.51080.app.standardchartered.com:55443,tcps://vpn-cs-reference-data-p1-0-b-0.51080.app.standardchartered.com:55443' are not resolvable
-	at com.solacesystems.jms.SolConnection.<init>(SolConnection.java:149) ~[sol-jms-10.6.3.jar:na]
-	at com.solacesystems.jms.SolConnection.<init>(SolConnection.java:86) ~[sol-jms-10.6.3.jar:na]
-	at com.solacesystems.jms.SolConnectionFactoryImpl.createConnection(SolConnectionFactoryImpl.java:112) ~[sol-jms-10.6.3.jar:na]
-	at com.scb.scroeconnect.solaceworker.config.SolaceConnectionConfig.createConnection(SolaceConnectionConfig.java:79) ~[classes/:na]
