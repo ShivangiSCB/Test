@@ -1,10 +1,9 @@
-Write testcase for the following class with 100% line coverage no matter the result, But I want 100% line coverage.
-
 package com.scb.scroeconnect.solaceworker.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.scb.scroeconnect.solaceworker.config.SolaceConnectionConfig;
+import com.scb.scroeconnect.solaceworker.config.SolacePropertiesConstant;
 import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
 import com.scb.scroeconnect.solaceworker.util.RetryHandler;
 import com.scb.scroeconnect.solaceworker.util.SaveFinalPayloadUtil;
@@ -16,18 +15,17 @@ import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadHeaderD
 import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedBodyDto;
 import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
 import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
 import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
 import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -35,34 +33,34 @@ import java.util.UUID;
 @Service
 public class SolaceWorkerService {
 
-    private static final Logger logger = LogManager.getLogger(SolaceWorkerService.class);
     private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
     private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
     private final SolaceConnectionConfig solaceConnectionConfig;
     @Autowired
     private final RetryHandler retryHandler;
+    private final SolacePropertiesConstant solacePropertiesConstant;
 
     private final SaveFinalPayloadUtil saveFinalPayloadUtil;
 
     public SolaceWorkerService(ConnectSolaceConfigRepository connectSolaceConfigRepository,
                                ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository,
                                SolaceConnectionConfig solaceConnectionConfig, SaveFinalPayloadUtil saveFinalPayloadUtil,
-                               RetryHandler retryHandler) {
+                               RetryHandler retryHandler, SolacePropertiesConstant solacePropertiesConstant) {
         this.connectSolaceConfigRepository = connectSolaceConfigRepository;
         this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
         this.solaceConnectionConfig = solaceConnectionConfig;
         this.retryHandler = retryHandler;
         this.saveFinalPayloadUtil = saveFinalPayloadUtil;
-
+        this.solacePropertiesConstant = solacePropertiesConstant;
     }
 
     @Transactional
     public void sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery) {
         Optional<ConnectNotificationDelivery> delivery = connectNotificationDeliveryRepository.findById(connectNotificationDelivery.getId());
         if (delivery.isEmpty()) {
-            logger.error("Delivery with ID {} not found", connectNotificationDelivery.getId());
+            log.error("Delivery with ID {} not found", connectNotificationDelivery.getId());
             throw new IllegalStateException("Delivery not found");
-        }
+        } // No need
 
         String transformedPayload = connectNotificationDelivery.getTransformedPayload();
         TransformedPayloadDto payload;
@@ -72,11 +70,11 @@ public class SolaceWorkerService {
             ObjectMapper objectMapper = new ObjectMapper();
             payload = objectMapper.readValue(transformedPayload, TransformedPayloadDto.class);
 
-            logger.info(payload.getBody());
-            logger.info(payload.getHeader());
+            log.info(payload.getBody());
+            log.info(payload.getHeader());
 
         } catch (JsonProcessingException e) {
-            logger.error("Error processing JSON: {}", e.getMessage(), e);
+            log.error("Error processing JSON: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to parse transformed payload", e);
         }
 
@@ -88,65 +86,67 @@ public class SolaceWorkerService {
             headerDto.setNotificationType(payload.getHeader().getNotificationType());
             String messageId = UUID.randomUUID().toString();
             headerDto.setMessageId(messageId);
-            headerDto.setInitiatedTimeStamp(LocalDateTime.now());
+            headerDto.setInitiatedTimeStamp(new Timestamp(System.currentTimeMillis()));
             finalPayload.setHeader(headerDto);
 
             TransformedBodyDto payloadBody = payload.getBody().get(0);
 
             bodyDto.setPhysicalAccountNbr(payloadBody.getPhysicalAccountNbr());
-            bodyDto.setIban(payloadBody.getIban());
             bodyDto.setAccountCurrency(payloadBody.getAccountCurrency());
             bodyDto.setAccountCountry(payloadBody.getAccountCountry());
-            bodyDto.setVaNumber(payloadBody.getVaNumber());
+            bodyDto.setVBAN(payloadBody.getVBAN());
             bodyDto.setVaultNbr(payloadBody.getVaultNbr());
-            bodyDto.setAmount(new BigDecimal(payloadBody.getAmount()));
+            bodyDto.setAmount(String.valueOf(new BigDecimal(payloadBody.getAmount())));
             bodyDto.setCrDrIndicator(payloadBody.getCrDrIndicator());
-            bodyDto.setTxnDate(LocalDateTime.parse(payloadBody.getTxnDate()));
-            bodyDto.setCbValueDate(LocalDateTime.parse(payloadBody.getCbValueDate()));
+            bodyDto.setTxnDate(String.valueOf(LocalDateTime.parse(payloadBody.getTxnDate())));
             bodyDto.setSourceChannelId(payloadBody.getSourceChannelId());
             bodyDto.setTxnReferenceNo(payloadBody.getTxnReferenceNo());
             bodyDto.setRelatedReferenceNo(payloadBody.getRelatedReferenceNo());
-            bodyDto.setRtatransID(payloadBody.getRtatransID());
+            bodyDto.setRtaTrackingId(payloadBody.getRtaTrackingId());
             bodyDto.setAppSeqNo(payloadBody.getAppSeqNo());
+            bodyDto.setCbValueDate(payloadBody.getCbValueDate());
             bodyDto.setNarration1(payloadBody.getNarration1());
             bodyDto.setNarration2(payloadBody.getNarration2());
             bodyDto.setNarration3(payloadBody.getNarration3());
             bodyDto.setNarration4(payloadBody.getNarration4());
             bodyDto.setNarration5(payloadBody.getNarration5());
             bodyDto.setNarration6(payloadBody.getNarration6());
+
             finalPayload.setBody(List.of(bodyDto));
+            finalPayload.setTrailer(payload.getTrailer());
 
             Long recipientId = connectNotificationDelivery.getRecipient().getId();
             boolean publish = publishToSolace(finalPayload, recipientId, connectNotificationDelivery.getNotificationEvent().getEventId());
             if (publish) {
-                logger.info("Solace Notification sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
+                log.info("Solace Notification sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
                 connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
                 saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery, finalPayload);
 
             } else {
-                logger.error("Failed to send Solace Notification delivery ID: {}", connectNotificationDelivery.getId());
+                log.error("Failed to send Solace Notification delivery ID: {}", connectNotificationDelivery.getId());
                 retryHandler.handleFailure(connectNotificationDelivery);
             }
         } catch (Exception e) {
-            logger.error("Failed to send Solace Notification: {}", e.getMessage());
+            log.error("Failed to send Solace Notification: {}", e.getMessage());
             throw new RuntimeException("Failed to send Solace Notification: ", e);
         }
     }
 
     public boolean publishToSolace(FinalPayloadDto finalPayload, Long recipientId, UUID eventId) {
         try {
-            Optional<ConnectSolaceConfig> connectSolaceConfig = connectSolaceConfigRepository.findByRecipientIdAndActive(recipientId);
-            if (connectSolaceConfig.isEmpty()) {
-                logger.error("No active Solace configuration found for recipientId: {}", recipientId);
-                throw new IllegalStateException("No active Solace configuration found for recipientId: " + recipientId);
-            }
+//            Optional<ConnectSolaceConfig> connectSolaceConfig = connectSolaceConfigRepository.findByRecipientIdAndActive(recipientId);
+//            if (connectSolaceConfig.isEmpty()) {
+//                log.error("No active Solace configuration found for recipientId: {}", recipientId);
+//                throw new IllegalStateException("No active Solace configuration found for recipientId: " + recipientId);
+//            }
             ObjectWriter ow = new ObjectMapper().writer();
             String message = ow.writeValueAsString(finalPayload);
             log.info("Solace Final Payload Message : {}", message);
-            solaceConnectionConfig.sendMessage(connectSolaceConfig.get().getTopic(), message, eventId.toString());
+            log.info("Get Topic {}", solacePropertiesConstant.getTopic());
+            solaceConnectionConfig.sendMessage(solacePropertiesConstant.getTopic(), message, eventId.toString());
             return true;
         } catch (Exception e) {
-            logger.error("Exception while sending Solace Notification: {} For Recipient Id: {}", e, recipientId);
+            log.error("Exception while sending Solace Notification: {} For Recipient Id: {}", e, recipientId);
             throw new RuntimeException("Exception while sending Solace Notification: " + e + "For Recipient Id: " + recipientId);
         }
     }
