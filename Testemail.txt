@@ -1,154 +1,165 @@
-package com.scb.scroeconnect.solaceworker.service;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectWriter;
-import com.scb.scroeconnect.solaceworker.config.SolaceConnectionConfig;
-import com.scb.scroeconnect.solaceworker.config.SolacePropertiesConstant;
-import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.solaceworker.util.RetryHandler;
-import com.scb.scroeconnect.solaceworker.util.SaveFinalPayloadUtil;
-import lombok.extern.log4j.Log4j2;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadBodyDto;
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadHeaderDto;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedBodyDto;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
-import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
-import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.math.BigDecimal;
-import java.sql.Timestamp;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+package com.scb.liquidity.messaging.producers;
+ 
+import com.scb.liquidity.entities.MomProperties;
+import com.scb.liquidity.entities.SolaceProperties;
+import com.scb.liquidity.exceptions.LiquidityMessagingException;
+import com.scb.liquidity.messaging.Constants.JMSHeader;
+import com.solacesystems.jms.SolConnectionFactory;
+import com.solacesystems.jms.message.SolMessage;
+import lombok.Getter;
+import lombok.Setter;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+ 
+import javax.jms.*;
 import java.util.UUID;
-
-@Log4j2
-@Service
-public class SolaceWorkerService {
-
-    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    private final SolaceConnectionConfig solaceConnectionConfig;
-    @Autowired
-    private final RetryHandler retryHandler;
-    private final SolacePropertiesConstant solacePropertiesConstant;
-
-    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
-
-    public SolaceWorkerService(ConnectSolaceConfigRepository connectSolaceConfigRepository,
-                               ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository,
-                               SolaceConnectionConfig solaceConnectionConfig, SaveFinalPayloadUtil saveFinalPayloadUtil,
-                               RetryHandler retryHandler, SolacePropertiesConstant solacePropertiesConstant) {
-        this.connectSolaceConfigRepository = connectSolaceConfigRepository;
-        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
-        this.solaceConnectionConfig = solaceConnectionConfig;
-        this.retryHandler = retryHandler;
-        this.saveFinalPayloadUtil = saveFinalPayloadUtil;
-        this.solacePropertiesConstant = solacePropertiesConstant;
+ 
+@Getter
+@Setter
+public class SolJmsSolaceProducer implements SolaceProducer {
+    private static final Logger LOGGER = LogManager.getLogger(SolJmsSolaceProducer.class);
+    private static final Boolean IS_DMQ_ENABLED = false;
+    private static final Integer MAX_REDELIVERY_COUNT = 20;
+ 
+    private MomProperties properties;
+    private SolConnectionFactory connectionFactory;
+    private static ThreadLocal<Session> jmsSession = new ThreadLocal<>();
+ 
+    public SolJmsSolaceProducer(SolaceProperties properties, SolConnectionFactory connectionFactory) {
+        this.connectionFactory = connectionFactory;
+        this.properties = properties;
     }
-
-    @Transactional
-    public void sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery) {
-        Optional<ConnectNotificationDelivery> delivery = connectNotificationDeliveryRepository.findById(connectNotificationDelivery.getId());
-        if (delivery.isEmpty()) {
-            log.error("Delivery with ID {} not found", connectNotificationDelivery.getId());
-            throw new IllegalStateException("Delivery not found");
-        } // No need
-
-        String transformedPayload = connectNotificationDelivery.getTransformedPayload();
-        TransformedPayloadDto payload;
-
+ 
+    public static ThreadLocal<Session> getJmsSession() {
+        return jmsSession;
+    }
+ 
+    public static void setJmsSession(ThreadLocal<Session> jmsSession) {
+        SolJmsSolaceProducer.jmsSession = jmsSession;
+    }
+ 
+    public <T> void send(String topicName, T payload) {
+        send(topicName, payload, null, null);
+    }
+ 
+    public <T> void send(String topicName, T payload, CompletionListener completionListener) {
+        send(topicName, payload, null, completionListener);
+    }
+ 
+    public <T> void send(String topicName, T payload, JMSHeader header, CompletionListener completionListener) {
         try {
-
-            ObjectMapper objectMapper = new ObjectMapper();
-            payload = objectMapper.readValue(transformedPayload, TransformedPayloadDto.class);
-
-            log.info(payload.getBody());
-            log.info(payload.getHeader());
-
-        } catch (JsonProcessingException e) {
-            log.error("Error processing JSON: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to parse transformed payload", e);
-        }
-
-        try {
-            FinalPayloadDto finalPayload = new FinalPayloadDto();
-            FinalPayloadHeaderDto headerDto = new FinalPayloadHeaderDto();
-            FinalPayloadBodyDto bodyDto = new FinalPayloadBodyDto();
-
-            headerDto.setNotificationType(payload.getHeader().getNotificationType());
-            String messageId = UUID.randomUUID().toString();
-            headerDto.setMessageId(messageId);
-            headerDto.setInitiatedTimeStamp(new Timestamp(System.currentTimeMillis()));
-            finalPayload.setHeader(headerDto);
-
-            TransformedBodyDto payloadBody = payload.getBody().get(0);
-
-            bodyDto.setPhysicalAccountNbr(payloadBody.getPhysicalAccountNbr());
-            bodyDto.setAccountCurrency(payloadBody.getAccountCurrency());
-            bodyDto.setAccountCountry(payloadBody.getAccountCountry());
-            bodyDto.setVBAN(payloadBody.getVBAN());
-            bodyDto.setVaultNbr(payloadBody.getVaultNbr());
-            bodyDto.setAmount(String.valueOf(new BigDecimal(payloadBody.getAmount())));
-            bodyDto.setCrDrIndicator(payloadBody.getCrDrIndicator());
-            bodyDto.setTxnDate(String.valueOf(LocalDateTime.parse(payloadBody.getTxnDate())));
-            bodyDto.setSourceChannelId(payloadBody.getSourceChannelId());
-            bodyDto.setTxnReferenceNo(payloadBody.getTxnReferenceNo());
-            bodyDto.setRelatedReferenceNo(payloadBody.getRelatedReferenceNo());
-            bodyDto.setRtaTrackingId(payloadBody.getRtaTrackingId());
-            bodyDto.setAppSeqNo(payloadBody.getAppSeqNo());
-            bodyDto.setCbValueDate(payloadBody.getCbValueDate());
-            bodyDto.setNarration1(payloadBody.getNarration1());
-            bodyDto.setNarration2(payloadBody.getNarration2());
-            bodyDto.setNarration3(payloadBody.getNarration3());
-            bodyDto.setNarration4(payloadBody.getNarration4());
-            bodyDto.setNarration5(payloadBody.getNarration5());
-            bodyDto.setNarration6(payloadBody.getNarration6());
-
-            finalPayload.setBody(List.of(bodyDto));
-            finalPayload.setTrailer(payload.getTrailer());
-
-            Long recipientId = connectNotificationDelivery.getRecipient().getId();
-            boolean publish = publishToSolace(finalPayload, recipientId, connectNotificationDelivery.getNotificationEvent().getEventId());
-            if (publish) {
-                log.info("Solace Notification sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
-                connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
-                saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery, finalPayload);
-
-            } else {
-                log.error("Failed to send Solace Notification delivery ID: {}", connectNotificationDelivery.getId());
-                retryHandler.handleFailure(connectNotificationDelivery);
+            checkProducerExistence();
+            Session session = jmsSession.get();
+            Destination destination = session.createTopic(topicName);
+            MessageProducer producer = session.createProducer(destination);
+            if (payload instanceof String) {
+                SolMessage textMessage = (SolMessage) jmsSession.get().createTextMessage((String) payload);
+                // START: Mandated by Solace Governance - SCB
+                String mId = UUID.randomUUID().toString();
+                textMessage.setJMSCorrelationID(mId);
+                textMessage.setStringProperty("topic", topicName);
+                if (header != null && header.isDMQEnabled())
+                    textMessage.setIsDMQEligible(header.isDMQEnabled());
+                else
+                    textMessage.setIsDMQEligible(IS_DMQ_ENABLED);
+                if (header != null && header.isRedeliverable())
+                    textMessage.setJMSXDeliveryCount(MAX_REDELIVERY_COUNT);
+                if (header != null && header.getConversationId() != null)
+                    textMessage.setStringProperty("conversationId", header.getConversationId());
+                if (header != null && header.getJMSMessageType() != null) {
+                    textMessage.setJMSType(header.getJMSMessageType());
+                } else {
+                    textMessage.setJMSType("string");
+                }
+                // END: Mandated by Solace Governance - SCB
+                if (header != null) {
+                    if (header.getJMSReplyTo() != null)
+                        textMessage.setJMSReplyTo(jmsSession.get().createTopic(header.getJMSReplyTo()));
+                    if (header.getJMSExpiration() != 0)
+                        textMessage.setJMSExpiration(header.getJMSExpiration());
+                    if (header.getJMSPriority() != 0)
+                        textMessage.setJMSPriority(header.getJMSPriority());
+                    if (!header.getJMSString().isEmpty())
+                        header.getJMSString().forEach((k, v) -> {
+                            try {
+                                textMessage.setStringProperty(k, v);
+                            } catch (JMSException e) {
+                                LOGGER.error("Error in adding property {}:{}", k, v);
+                            }
+                        });
+                    if (!header.getJMSBoolean().isEmpty())
+                        header.getJMSBoolean().forEach((k, v) -> {
+                            try {
+                                textMessage.setBooleanProperty(k, v);
+                            } catch (JMSException e) {
+                                LOGGER.error("Error in adding property {}:{}", k, v);
+                            }
+                        });
+                    if (!header.getJMSDouble().isEmpty())
+                        header.getJMSDouble().forEach((k, v) -> {
+                            try {
+                                textMessage.setDoubleProperty(k, v);
+                            } catch (JMSException e) {
+                                LOGGER.error("Error in adding property {}:{}", k, v);
+                            }
+                        });
+                    if (!header.getJMSInt().isEmpty())
+                        header.getJMSInt().forEach((k, v) -> {
+                            try {
+                                textMessage.setIntProperty(k, v);
+                            } catch (JMSException e) {
+                                LOGGER.error("Error in adding property {}:{}", k, v);
+                            }
+                        });
+                    if (!header.getJMSLong().isEmpty())
+                        header.getJMSLong().forEach((k, v) -> {
+                            try {
+                                textMessage.setLongProperty(k, v);
+                            } catch (JMSException e) {
+                                LOGGER.error("Error in added property {}:{}", k, v);
+                            }
+                        });
+                }
+                textMessage.setJMSTimestamp(System.currentTimeMillis());
+                textMessage.setJMSDestination(destination);
+                if (completionListener != null)
+                    producer.send(textMessage, completionListener);
+                else
+                    producer.send(textMessage);
+                LOGGER.info("Message sent with id: {}, correlationId: {}, timestamp: {}", textMessage.getJMSMessageID(),
+                        textMessage.getJMSCorrelationID(), textMessage.getJMSTimestamp());
+                LOGGER.debug("Message sent with id: {} -- {}", textMessage.getJMSMessageID(),
+                        ((TextMessage) textMessage).getText());
+                return;
             }
-        } catch (Exception e) {
-            log.error("Failed to send Solace Notification: {}", e.getMessage());
-            throw new RuntimeException("Failed to send Solace Notification: ", e);
+        } catch (JMSException e) {
+            throw new LiquidityMessagingException("Error while sending message", e);
         }
+        throw new LiquidityMessagingException("Message Type unsupported");
     }
-
-    public boolean publishToSolace(FinalPayloadDto finalPayload, Long recipientId, UUID eventId) {
+ 
+    private void checkProducerExistence() {
         try {
-//            Optional<ConnectSolaceConfig> connectSolaceConfig = connectSolaceConfigRepository.findByRecipientIdAndActive(recipientId);
-//            if (connectSolaceConfig.isEmpty()) {
-//                log.error("No active Solace configuration found for recipientId: {}", recipientId);
-//                throw new IllegalStateException("No active Solace configuration found for recipientId: " + recipientId);
-//            }
-            ObjectWriter ow = new ObjectMapper().writer();
-            String message = ow.writeValueAsString(finalPayload);
-            log.info("Solace Final Payload Message : {}", message);
-            log.info("Get Topic {}", solacePropertiesConstant.getTopic());
-            solaceConnectionConfig.sendMessage(solacePropertiesConstant.getTopic(), message, eventId.toString());
-            return true;
-        } catch (Exception e) {
-            log.error("Exception while sending Solace Notification: {} For Recipient Id: {}", e, recipientId);
-            throw new RuntimeException("Exception while sending Solace Notification: " + e + "For Recipient Id: " + recipientId);
+            if (jmsSession.get() == null) {
+                Connection connection = this.connectionFactory.createConnection();
+                Session session = connection.createSession(false, Session.CLIENT_ACKNOWLEDGE);
+                jmsSession.set(session);
+            }
+        } catch (JMSException e) {
+            throw new LiquidityMessagingException("Error in connection instantiation", e);
         }
     }
-
+ 
+    public void triggerShutdown() {
+        try {
+            LOGGER.info("Shutdown called for host: {}", properties.getHostname());
+            if (jmsSession.get() != null) {
+                jmsSession.get().close();
+                jmsSession.remove();
+            }
+            LOGGER.info("Producer for host: {} is shutdown", properties.getHostname());
+        } catch (JMSException e) {
+            throw new LiquidityMessagingException("Error in closing the connection", e);
+        }
+    }
 }
