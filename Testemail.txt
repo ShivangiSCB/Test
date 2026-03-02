@@ -1,85 +1,84 @@
-package com.scb.liquidity.messaging.producers;
- 
+package com.scb.scroeconnect.solaceworker.config;
+
+
 import com.scb.liquidity.entities.MomProperties;
 import com.scb.liquidity.entities.SolaceProperties;
 import com.scb.liquidity.exceptions.LiquidityMessagingException;
-import com.scb.liquidity.messaging.Constants.JMSHeader;
+import com.scb.scroeconnect.solaceworker.config.JMSHeader;
 import com.solacesystems.jms.SolConnectionFactory;
 import com.solacesystems.jms.message.SolMessage;
 import lombok.Getter;
 import lombok.Setter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
- 
+
 import javax.jms.*;
 import java.util.UUID;
- 
+
 @Getter
 @Setter
-public class SolJmsSolaceProducer implements SolaceProducer {
-    private static final Logger LOGGER = LogManager.getLogger(SolJmsSolaceProducer.class);
+public class SolaceConnectionConfigPratik implements SolaceProducer {
+    private static final Logger LOGGER = LogManager.getLogger(SolaceConnectionConfigPratik.class);
     private static final Boolean IS_DMQ_ENABLED = false;
     private static final Integer MAX_REDELIVERY_COUNT = 20;
- 
+
     private MomProperties properties;
     private SolConnectionFactory connectionFactory;
     private static ThreadLocal<Session> jmsSession = new ThreadLocal<>();
- 
-    public SolJmsSolaceProducer(SolaceProperties properties, SolConnectionFactory connectionFactory) {
+
+    public SolaceConnectionConfigPratik(SolaceProperties properties, SolConnectionFactory connectionFactory) {
         this.connectionFactory = connectionFactory;
         this.properties = properties;
     }
- 
+
     public static ThreadLocal<Session> getJmsSession() {
         return jmsSession;
     }
- 
+
     public static void setJmsSession(ThreadLocal<Session> jmsSession) {
-        SolJmsSolaceProducer.jmsSession = jmsSession;
+        SolaceConnectionConfigPratik.jmsSession = jmsSession;
     }
- 
+
     public <T> void send(String topicName, T payload) {
-        send(topicName, payload, null, null);
+        send(topicName, payload, (JMSHeader) null);
     }
- 
-    public <T> void send(String topicName, T payload, CompletionListener completionListener) {
-        send(topicName, payload, null, completionListener);
-    }
- 
-    public <T> void send(String topicName, T payload, JMSHeader header, CompletionListener completionListener) {
+
+    public <T> void send(String topicName, T payload, JMSHeader header) {
         try {
             checkProducerExistence();
             Session session = jmsSession.get();
             Destination destination = session.createTopic(topicName);
             MessageProducer producer = session.createProducer(destination);
+
             if (payload instanceof String) {
-                SolMessage textMessage = (SolMessage) jmsSession.get().createTextMessage((String) payload);
+                TextMessage textMessage = session.createTextMessage((String) payload);
+
                 // START: Mandated by Solace Governance - SCB
                 String mId = UUID.randomUUID().toString();
                 textMessage.setJMSCorrelationID(mId);
                 textMessage.setStringProperty("topic", topicName);
-                if (header != null && header.isDMQEnabled())
-                    textMessage.setIsDMQEligible(header.isDMQEnabled());
-                else
-                    textMessage.setIsDMQEligible(IS_DMQ_ENABLED);
-                if (header != null && header.isRedeliverable())
-                    textMessage.setJMSXDeliveryCount(MAX_REDELIVERY_COUNT);
-                if (header != null && header.getConversationId() != null)
+
+                if (header != null && header.getConversationId() != null) {
                     textMessage.setStringProperty("conversationId", header.getConversationId());
+                }
+
                 if (header != null && header.getJMSMessageType() != null) {
                     textMessage.setJMSType(header.getJMSMessageType());
                 } else {
                     textMessage.setJMSType("string");
                 }
-                // END: Mandated by Solace Governance - SCB
+
                 if (header != null) {
-                    if (header.getJMSReplyTo() != null)
-                        textMessage.setJMSReplyTo(jmsSession.get().createTopic(header.getJMSReplyTo()));
-                    if (header.getJMSExpiration() != 0)
+                    if (header.getJMSReplyTo() != null) {
+                        textMessage.setJMSReplyTo(session.createTopic(header.getJMSReplyTo()));
+                    }
+                    if (header.getJMSExpiration() != 0) {
                         textMessage.setJMSExpiration(header.getJMSExpiration());
-                    if (header.getJMSPriority() != 0)
+                    }
+                    if (header.getJMSPriority() != 0) {
                         textMessage.setJMSPriority(header.getJMSPriority());
-                    if (!header.getJMSString().isEmpty())
+                    }
+                    if (!header.getJMSString().isEmpty()) {
                         header.getJMSString().forEach((k, v) -> {
                             try {
                                 textMessage.setStringProperty(k, v);
@@ -87,7 +86,8 @@ public class SolJmsSolaceProducer implements SolaceProducer {
                                 LOGGER.error("Error in adding property {}:{}", k, v);
                             }
                         });
-                    if (!header.getJMSBoolean().isEmpty())
+                    }
+                    if (!header.getJMSBoolean().isEmpty()) {
                         header.getJMSBoolean().forEach((k, v) -> {
                             try {
                                 textMessage.setBooleanProperty(k, v);
@@ -95,7 +95,8 @@ public class SolJmsSolaceProducer implements SolaceProducer {
                                 LOGGER.error("Error in adding property {}:{}", k, v);
                             }
                         });
-                    if (!header.getJMSDouble().isEmpty())
+                    }
+                    if (!header.getJMSDouble().isEmpty()) {
                         header.getJMSDouble().forEach((k, v) -> {
                             try {
                                 textMessage.setDoubleProperty(k, v);
@@ -103,7 +104,8 @@ public class SolJmsSolaceProducer implements SolaceProducer {
                                 LOGGER.error("Error in adding property {}:{}", k, v);
                             }
                         });
-                    if (!header.getJMSInt().isEmpty())
+                    }
+                    if (!header.getJMSInt().isEmpty()) {
                         header.getJMSInt().forEach((k, v) -> {
                             try {
                                 textMessage.setIntProperty(k, v);
@@ -111,25 +113,26 @@ public class SolJmsSolaceProducer implements SolaceProducer {
                                 LOGGER.error("Error in adding property {}:{}", k, v);
                             }
                         });
-                    if (!header.getJMSLong().isEmpty())
+                    }
+                    if (!header.getJMSLong().isEmpty()) {
                         header.getJMSLong().forEach((k, v) -> {
                             try {
                                 textMessage.setLongProperty(k, v);
                             } catch (JMSException e) {
-                                LOGGER.error("Error in added property {}:{}", k, v);
+                                LOGGER.error("Error in adding property {}:{}", k, v);
                             }
                         });
+                    }
                 }
+
                 textMessage.setJMSTimestamp(System.currentTimeMillis());
                 textMessage.setJMSDestination(destination);
-                if (completionListener != null)
-                    producer.send(textMessage, completionListener);
-                else
-                    producer.send(textMessage);
+
+                producer.send(textMessage);
+
                 LOGGER.info("Message sent with id: {}, correlationId: {}, timestamp: {}", textMessage.getJMSMessageID(),
                         textMessage.getJMSCorrelationID(), textMessage.getJMSTimestamp());
-                LOGGER.debug("Message sent with id: {} -- {}", textMessage.getJMSMessageID(),
-                        ((TextMessage) textMessage).getText());
+                LOGGER.debug("Message sent with id: {} -- {}", textMessage.getJMSMessageID(), textMessage.getText());
                 return;
             }
         } catch (JMSException e) {
@@ -137,7 +140,7 @@ public class SolJmsSolaceProducer implements SolaceProducer {
         }
         throw new LiquidityMessagingException("Message Type unsupported");
     }
- 
+
     private void checkProducerExistence() {
         try {
             if (jmsSession.get() == null) {
@@ -149,7 +152,7 @@ public class SolJmsSolaceProducer implements SolaceProducer {
             throw new LiquidityMessagingException("Error in connection instantiation", e);
         }
     }
- 
+
     public void triggerShutdown() {
         try {
             LOGGER.info("Shutdown called for host: {}", properties.getHostname());
