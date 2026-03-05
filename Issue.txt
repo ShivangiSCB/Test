@@ -1,146 +1,16 @@
-package com.scb.scroeconnect.solaceworker.config;
-
-import com.solacesystems.jms.SolConnectionFactory;
-import com.solacesystems.jms.SolJmsUtility;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.jms.connection.CachingConnectionFactory;
-import org.springframework.jms.core.JmsTemplate;
-
-import java.util.Map;
-
-@Log4j2
-@Configuration
-public class SolaceConnectionConfig {
-    private final SolaceProperties solacePropertiesConstant;
-
-    public SolaceConnectionConfig(SolaceProperties solacePropertiesConstant) {
-        this.solacePropertiesConstant = solacePropertiesConstant;
-    }
-
-    @Bean
-    public SolConnectionFactory solConnectionFactory(SolaceProperties props) throws Exception {
-        Map<String, String> ssl = solacePropertiesConstant.getSsl();
-        Map<String, String> queue = solacePropertiesConstant.getQueue();
-
-        SolConnectionFactory cf = SolJmsUtility.createConnectionFactory();
-        cf.setVPN(queue.get("vpn"));
-        cf.setHost(queue.get("hostname"));
-        cf.setUsername(queue.get("username"));
-        cf.setPassword(queue.get("password"));
-        cf.setConnectRetries(solacePropertiesConstant.getConnectRetries());
-        cf.setConnectRetriesPerHost(solacePropertiesConstant.getConnectRetriesPerHost());
-        cf.setConnectTimeoutInMillis(solacePropertiesConstant.getConnectTimeoutInMillis());
-        cf.setClientID(queue.get("clientId"));
-
-        cf.setSSLTrustStore(ssl.get("truststorePath"));
-        cf.setSSLTrustStorePassword(ssl.get("truststorePassword"));
-        cf.setSSLTrustStoreFormat(ssl.get("truststoreType"));
-        cf.setSSLKeyStore(ssl.get("keystorePath"));
-        cf.setSSLKeyStorePassword(ssl.get("keystorePassword"));
-        cf.setSSLKeyStoreFormat(ssl.get("keystoreType"));
-        cf.setAuthenticationScheme("AUTHENTICATION_SCHEME_CLIENT_CERTIFICATE");
-
-        log.info("Solace Connection Factory created successfully");
-        return cf;
-    }
-
-    @Bean
-    public CachingConnectionFactory cachingConnectionFactory(SolConnectionFactory solConnectionFactory) {
-        CachingConnectionFactory cachingFactory = new CachingConnectionFactory(solConnectionFactory);
+Can you put these 10, 20 and all in app.properties?
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(10);
+        executor.setMaxPoolSize(20);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("solace-worker-async");
+        executor.initialize();
+        return executor;
+    
         cachingFactory.setSessionCacheSize(10);
-        return cachingFactory;
-    }
 
-    @Bean
-    public JmsTemplate jmsTemplate(CachingConnectionFactory cachingConnectionFactory) {
-        JmsTemplate jmsTemplate = new JmsTemplate(cachingConnectionFactory);
-        jmsTemplate.setPubSubDomain(true);
-        return jmsTemplate;
-    }
-}
+ALso for the below code where we are using setter, Can we create a util class, to make it more readable?
 
-package com.scb.scroeconnect.solaceworker.service;
-
-import jakarta.jms.TextMessage;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jms.core.JmsTemplate;
-import org.springframework.stereotype.Service;
-
-@Log4j2
-@Service
-@RequiredArgsConstructor
-public class SolaceProducerService {
-
-    @Autowired
-    private final JmsTemplate jmsTemplate;
-
-    public void sendMessage(String topic, String payload, String eventId) {
-        jmsTemplate.send(topic, session -> {
-            TextMessage message = session.createTextMessage(payload);
-            message.setJMSCorrelationID(eventId);
-            message.setJMSTimestamp(System.currentTimeMillis());
-            log.info("JMS Message ID {}", message.getJMSMessageID());
-            return message;
-        });
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.service;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.scb.scroeconnect.solaceworker.config.SolaceProperties;
-import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.solaceworker.util.RetryHandler;
-import com.scb.scroeconnect.solaceworker.util.SaveFinalPayloadUtil;
-import lombok.extern.log4j.Log4j2;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadBodyDto;
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadHeaderDto;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedBodyDto;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
-import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.math.BigDecimal;
-import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.UUID;
-
-@Log4j2
-@Service
-public class SolaceWorkerService {
-
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    private final SolaceProducerService solaceConnectionConfig;
-    @Autowired
-    private final RetryHandler retryHandler;
-    private final SolaceProperties solaceProperties;
-    private final ObjectMapper objectMapper;
-    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
-
-    public SolaceWorkerService(ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository,
-                               SolaceProducerService solaceConnectionConfig, SaveFinalPayloadUtil saveFinalPayloadUtil,
-                               RetryHandler retryHandler, SolaceProperties solaceProperties,
-                               ObjectMapper objectMapper) {
-        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
-        this.solaceConnectionConfig = solaceConnectionConfig;
-        this.retryHandler = retryHandler;
-        this.saveFinalPayloadUtil = saveFinalPayloadUtil;
-        this.solaceProperties = solaceProperties;
-        this.objectMapper = objectMapper;
-    }
-
-    @Transactional
-    public void sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery) {
         String transformedPayload = connectNotificationDelivery.getTransformedPayload();
         TransformedPayloadDto payload;
         try {
@@ -155,7 +25,7 @@ public class SolaceWorkerService {
             FinalPayloadBodyDto bodyDto = new FinalPayloadBodyDto();
 
             headerDto.setNotificationType(payload.getHeader().getNotificationType());
-            String messageId = UUID.randomUUID().toString();
+            String messageId = connectNotificationDelivery.getNotificationEvent().getEventId().toString();
             headerDto.setMessageId(messageId);
             OffsetDateTime now = OffsetDateTime.now();
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
@@ -201,19 +71,4 @@ public class SolaceWorkerService {
             log.error("Failed to send Solace Notification: {}", e.getMessage());
             throw new RuntimeException("Failed to send Solace Notification: ", e);
         }
-    }
 
-    public boolean publishToSolace(FinalPayloadDto finalPayload, Long recipientId, UUID eventId) {
-        try {
-            String message = objectMapper.writeValueAsString(finalPayload);
-            log.info("Solace Final Payload Message : {}", message);
-            log.info("Get Topic {}", solaceProperties.getTopic());
-            solaceConnectionConfig.sendMessage(solaceProperties.getTopic(), message, eventId.toString());
-            return true;
-        } catch (Exception e) {
-            log.error("Exception while sending Solace Notification: {} For Recipient Id: {}", e, recipientId);
-            throw new RuntimeException("Exception while sending Solace Notification: " + e + "For Recipient Id: " + recipientId);
-        }
-    }
-
-}
