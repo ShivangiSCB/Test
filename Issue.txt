@@ -1,33 +1,219 @@
-SLF4J(W): Class path contains multiple SLF4J providers.
-SLF4J(W): Found provider [ch.qos.logback.classic.spi.LogbackServiceProvider@2aafb23c]
-SLF4J(W): Found provider [org.apache.logging.slf4j.SLF4JServiceProvider@2b80d80f]
-SLF4J(W): See https://www.slf4j.org/codes.html#multiple_bindings for an explanation.
-SLF4J(I): Actual provider is of type [ch.qos.logback.classic.spi.LogbackServiceProvider@2aafb23c]
-12:10:06,686 |-INFO in ch.qos.logback.classic.LoggerContext[default] - This is logback-classic version 1.5.18
-12:10:06,697 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Here is a list of configurators discovered as a service, by rank: 
-12:10:06,697 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb -   org.springframework.boot.logging.logback.RootLogLevelConfigurator
-12:10:06,697 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - They will be invoked in order until ExecutionStatus.DO_NOT_INVOKE_NEXT_IF_ANY is returned.
-12:10:06,697 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Constructed configurator of type class org.springframework.boot.logging.logback.RootLogLevelConfigurator
-12:10:06,727 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - org.springframework.boot.logging.logback.RootLogLevelConfigurator.configure() call lasted 1 milliseconds. ExecutionStatus=INVOKE_NEXT_IF_ANY
-12:10:06,727 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Trying to configure with ch.qos.logback.classic.joran.SerializedModelConfigurator
-12:10:06,730 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Constructed configurator of type class ch.qos.logback.classic.joran.SerializedModelConfigurator
-12:10:06,742 |-INFO in ch.qos.logback.classic.LoggerContext[default] - Could NOT find resource [logback-test.scmo]
-12:10:06,743 |-INFO in ch.qos.logback.classic.LoggerContext[default] - Could NOT find resource [logback.scmo]
-12:10:06,743 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - ch.qos.logback.classic.joran.SerializedModelConfigurator.configure() call lasted 13 milliseconds. ExecutionStatus=INVOKE_NEXT_IF_ANY
-12:10:06,743 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Trying to configure with ch.qos.logback.classic.util.DefaultJoranConfigurator
-12:10:06,745 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Constructed configurator of type class ch.qos.logback.classic.util.DefaultJoranConfigurator
-12:10:06,747 |-INFO in ch.qos.logback.classic.LoggerContext[default] - Could NOT find resource [logback-test.xml]
-12:10:06,748 |-INFO in ch.qos.logback.classic.LoggerContext[default] - Could NOT find resource [logback.xml]
-12:10:06,748 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - ch.qos.logback.classic.util.DefaultJoranConfigurator.configure() call lasted 3 milliseconds. ExecutionStatus=INVOKE_NEXT_IF_ANY
-12:10:06,748 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Trying to configure with ch.qos.logback.classic.BasicConfigurator
-12:10:06,751 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Constructed configurator of type class ch.qos.logback.classic.BasicConfigurator
-12:10:06,751 |-INFO in ch.qos.logback.classic.BasicConfigurator@479ceda0 - Setting up default configuration.
-12:10:06,825 |-INFO in ch.qos.logback.core.ConsoleAppender[console] - BEWARE: Writing to the console can be very slow. Avoid logging to the 
-12:10:06,825 |-INFO in ch.qos.logback.core.ConsoleAppender[console] - console in production environments, especially in high volume systems.
-12:10:06,825 |-INFO in ch.qos.logback.core.ConsoleAppender[console] - See also https://logback.qos.ch/codes.html#slowConsole
-12:10:06,827 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - ch.qos.logback.classic.BasicConfigurator.configure() call lasted 76 milliseconds. ExecutionStatus=NEUTRAL
-12:10:08,171 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [Properties] in [ch.qos.logback.classic.LoggerContext]
-12:10:08,171 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [Appenders] in [ch.qos.logback.classic.LoggerContext]
-12:10:08,171 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [Loggers] in [ch.qos.logback.classic.LoggerContext]
-12:10:08,173 |-INFO in ch.qos.logback.core.model.processor.DefaultProcessor@6d07a63d - End of configuration.
-12:10:08,174 |-INFO in org.springframework.boot.logging.logback.SpringBootJoranConfigurator@571c5681 - Registering current configuration as safe fallback point
+package com.scb.scroeconnect.solaceworker.config;
+
+import com.solacesystems.jms.SolConnectionFactory;
+import com.solacesystems.jms.SolJmsUtility;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jms.connection.CachingConnectionFactory;
+import org.springframework.jms.core.JmsTemplate;
+
+import java.util.Map;
+
+@Log4j2
+@Configuration
+public class SolaceConnectionConfig {
+    private final SolaceProperties solacePropertiesConstant;
+
+    public SolaceConnectionConfig(SolaceProperties solacePropertiesConstant) {
+        this.solacePropertiesConstant = solacePropertiesConstant;
+    }
+
+    @Bean
+    public SolConnectionFactory solConnectionFactory(SolaceProperties props) throws Exception {
+        Map<String, String> ssl = solacePropertiesConstant.getSsl();
+        Map<String, String> queue = solacePropertiesConstant.getQueue();
+
+        SolConnectionFactory cf = SolJmsUtility.createConnectionFactory();
+        cf.setVPN(queue.get("vpn"));
+        cf.setHost(queue.get("hostname"));
+        cf.setUsername(queue.get("username"));
+        cf.setPassword(queue.get("password"));
+        cf.setConnectRetries(solacePropertiesConstant.getConnectRetries());
+        cf.setConnectRetriesPerHost(solacePropertiesConstant.getConnectRetriesPerHost());
+        cf.setConnectTimeoutInMillis(solacePropertiesConstant.getConnectTimeoutInMillis());
+        cf.setClientID(queue.get("clientId"));
+
+        cf.setSSLTrustStore(ssl.get("truststorePath"));
+        cf.setSSLTrustStorePassword(ssl.get("truststorePassword"));
+        cf.setSSLTrustStoreFormat(ssl.get("truststoreType"));
+        cf.setSSLKeyStore(ssl.get("keystorePath"));
+        cf.setSSLKeyStorePassword(ssl.get("keystorePassword"));
+        cf.setSSLKeyStoreFormat(ssl.get("keystoreType"));
+        cf.setAuthenticationScheme("AUTHENTICATION_SCHEME_CLIENT_CERTIFICATE");
+
+        log.info("Solace Connection Factory created successfully");
+        return cf;
+    }
+
+    @Bean
+    public CachingConnectionFactory cachingConnectionFactory(SolConnectionFactory solConnectionFactory) {
+        CachingConnectionFactory cachingFactory = new CachingConnectionFactory(solConnectionFactory);
+        cachingFactory.setSessionCacheSize(10);
+        return cachingFactory;
+    }
+
+    @Bean
+    public JmsTemplate jmsTemplate(CachingConnectionFactory cachingConnectionFactory) {
+        JmsTemplate jmsTemplate = new JmsTemplate(cachingConnectionFactory);
+        jmsTemplate.setPubSubDomain(true);
+        return jmsTemplate;
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.service;
+
+import jakarta.jms.TextMessage;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jms.core.JmsTemplate;
+import org.springframework.stereotype.Service;
+
+@Log4j2
+@Service
+@RequiredArgsConstructor
+public class SolaceProducerService {
+
+    @Autowired
+    private final JmsTemplate jmsTemplate;
+
+    public void sendMessage(String topic, String payload, String eventId) {
+        jmsTemplate.send(topic, session -> {
+            TextMessage message = session.createTextMessage(payload);
+            message.setJMSCorrelationID(eventId);
+            message.setJMSTimestamp(System.currentTimeMillis());
+            log.info("JMS Message ID {}", message.getJMSMessageID());
+            return message;
+        });
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.scb.scroeconnect.solaceworker.config.SolaceProperties;
+import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.solaceworker.util.RetryHandler;
+import com.scb.scroeconnect.solaceworker.util.SaveFinalPayloadUtil;
+import lombok.extern.log4j.Log4j2;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadHeaderDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.UUID;
+
+@Log4j2
+@Service
+public class SolaceWorkerService {
+
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+    private final SolaceProducerService solaceConnectionConfig;
+    @Autowired
+    private final RetryHandler retryHandler;
+    private final SolaceProperties solaceProperties;
+    private final ObjectMapper objectMapper;
+    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
+
+    public SolaceWorkerService(ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository,
+                               SolaceProducerService solaceConnectionConfig, SaveFinalPayloadUtil saveFinalPayloadUtil,
+                               RetryHandler retryHandler, SolaceProperties solaceProperties,
+                               ObjectMapper objectMapper) {
+        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
+        this.solaceConnectionConfig = solaceConnectionConfig;
+        this.retryHandler = retryHandler;
+        this.saveFinalPayloadUtil = saveFinalPayloadUtil;
+        this.solaceProperties = solaceProperties;
+        this.objectMapper = objectMapper;
+    }
+
+    @Transactional
+    public void sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery) {
+        String transformedPayload = connectNotificationDelivery.getTransformedPayload();
+        TransformedPayloadDto payload;
+        try {
+            payload = objectMapper.readValue(transformedPayload, TransformedPayloadDto.class);
+        } catch (JsonProcessingException e) {
+            log.error("Error processing JSON: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to parse transformed payload", e);
+        }
+        try {
+            FinalPayloadDto finalPayload = new FinalPayloadDto();
+            FinalPayloadHeaderDto headerDto = new FinalPayloadHeaderDto();
+            FinalPayloadBodyDto bodyDto = new FinalPayloadBodyDto();
+
+            headerDto.setNotificationType(payload.getHeader().getNotificationType());
+            String messageId = UUID.randomUUID().toString();
+            headerDto.setMessageId(messageId);
+            OffsetDateTime now = OffsetDateTime.now();
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
+            headerDto.setInitiatedTimeStamp(now.format(formatter));
+            finalPayload.setHeader(headerDto);
+            TransformedBodyDto payloadBody = payload.getBody().get(0);
+            bodyDto.setPhysicalAccountNbr(payloadBody.getPhysicalAccountNbr());
+            bodyDto.setAccountCurrency(payloadBody.getAccountCurrency());
+            bodyDto.setAccountCountry(payloadBody.getAccountCountry());
+            bodyDto.setVban(payloadBody.getVBAN());
+            bodyDto.setVaultNbr(payloadBody.getVaultNbr());
+            bodyDto.setAmount(String.valueOf(new BigDecimal(payloadBody.getAmount())));
+            bodyDto.setCrDrIndicator(payloadBody.getCrDrIndicator());
+            bodyDto.setTxnDate(String.valueOf(payloadBody.getTxnDate()));
+            bodyDto.setSourceChannelId(payloadBody.getSourceChannelId());
+            bodyDto.setTxnReferenceNo(payloadBody.getTxnReferenceNo());
+            bodyDto.setRelatedReferenceNo(payloadBody.getRelatedReferenceNo());
+            bodyDto.setRtaTrackingId(payloadBody.getRtaTrackingId());
+            bodyDto.setAppSeqNo(payloadBody.getAppSeqNo());
+            bodyDto.setCbValueDate(String.valueOf(payloadBody.getCbValueDate()));
+            bodyDto.setNarration1(payloadBody.getNarration1());
+            bodyDto.setNarration2(payloadBody.getNarration2());
+            bodyDto.setNarration3(payloadBody.getNarration3());
+            bodyDto.setNarration4(payloadBody.getNarration4());
+            bodyDto.setNarration5(payloadBody.getNarration5());
+            bodyDto.setNarration6(payloadBody.getNarration6());
+
+            finalPayload.setData(List.of(bodyDto));
+            finalPayload.setTrailer(payload.getTrailer());
+
+            Long recipientId = connectNotificationDelivery.getRecipient().getId();
+            boolean publish = publishToSolace(finalPayload, recipientId, connectNotificationDelivery.getNotificationEvent().getEventId());
+            if (publish) {
+                log.info("Solace Notification sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
+                connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
+                saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery, finalPayload);
+
+            } else {
+                log.error("Failed to send Solace Notification delivery ID: {}", connectNotificationDelivery.getId());
+                retryHandler.handleFailure(connectNotificationDelivery);
+            }
+        } catch (Exception e) {
+            log.error("Failed to send Solace Notification: {}", e.getMessage());
+            throw new RuntimeException("Failed to send Solace Notification: ", e);
+        }
+    }
+
+    public boolean publishToSolace(FinalPayloadDto finalPayload, Long recipientId, UUID eventId) {
+        try {
+            String message = objectMapper.writeValueAsString(finalPayload);
+            log.info("Solace Final Payload Message : {}", message);
+            log.info("Get Topic {}", solaceProperties.getTopic());
+            solaceConnectionConfig.sendMessage(solaceProperties.getTopic(), message, eventId.toString());
+            return true;
+        } catch (Exception e) {
+            log.error("Exception while sending Solace Notification: {} For Recipient Id: {}", e, recipientId);
+            throw new RuntimeException("Exception while sending Solace Notification: " + e + "For Recipient Id: " + recipientId);
+        }
+    }
+
+}
