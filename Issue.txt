@@ -1,132 +1,33 @@
-{"country":"US","notificationType":"Type_001","contentBody":{"PhysicalAccountNumber":"ACC123456","AccountCountry":"US","AccountCurrency":"USD","ParentVaultName":"Parent Vault","ParentVaultNumber":"PVN001","ChildVaultName":"Child Vault","ChildVaultNumber":"CVN001","ChildVaultLevel":"1","VANumber":"VA123456","VAName":"Virtual Account Name"},"contentType":"JSON","subject":"VAM - Subaccount Creation","refId":"REF12345","priority":null}
-
-
-package com.scb.scroeconnect.emailworker.converter;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.scb.scroeconnect.emailworker.dto.EmailPayloadDTO;
-import jakarta.persistence.AttributeConverter;
-import jakarta.persistence.Converter;
-
-@Converter(autoApply = false)
-public class EmailPayloadConverter implements AttributeConverter<EmailPayloadDTO, String> {
-
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-    @Override
-    public String convertToDatabaseColumn(EmailPayloadDTO emailPayloadDTO) {
-        if (emailPayloadDTO == null) return null;
-        try {
-            return OBJECT_MAPPER.writeValueAsString(emailPayloadDTO);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Failed to serialize EmailPayloadDTO", e);
-        }
-    }
-
-    @Override
-    public EmailPayloadDTO convertToEntityAttribute(String emailData) {
-        if (emailData == null) return null;
-        try {
-            return OBJECT_MAPPER.readValue(emailData, EmailPayloadDTO.class);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Failed to deserialize SolacePayloadDTO", e);
-        }
-    }
-}
-
-package com.scb.scroeconnect.emailworker.dto;
-
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.Date;
-
-public class EmailPayloadDTO {
-    private String messageId;
-    private String subject;
-    private String contentBody;
-    private String attachment;
-    private String country;
-    private String notificationType;
-    private String contentType;
-    private String priority;
-    private Date initiatedTimestamp;
-
-    public EmailPayloadDTO() {
-    }
-
-    public String getMessageId() {
-        return messageId;
-    }
-
-    public void setMessageId(String messageId) {
-        this.messageId = messageId;
-    }
-
-    public String getSubject() {
-        return subject;
-    }
-
-    public void setSubject(String subject) {
-        this.subject = subject;
-    }
-
-    public String getContentBody() {
-        return contentBody;
-    }
-
-    public void setContentBody(String contentBody) {
-        this.contentBody = Base64.getEncoder().encodeToString(contentBody.getBytes(StandardCharsets.UTF_8));
-    }
-
-    public String getAttachment() {
-        return attachment;
-    }
-
-    public void setAttachment(String attachment) {
-        this.attachment = attachment;
-    }
-
-    public Date getInitiatedTimestamp() {
-        return initiatedTimestamp;
-    }
-
-    public void setInitiatedTimestamp(Date initiatedTimestamp) {
-        this.initiatedTimestamp = initiatedTimestamp;
-    }
-
-    public String getCountry() {
-        return country;
-    }
-
-    public void setCountry(String country) {
-        this.country = country;
-    }
-
-    public String getNotificationType() {
-        return notificationType;
-    }
-
-    public void setNotificationType(String notificationType) {
-        this.notificationType = notificationType;
-    }
-
-    public String getContentType() {
-        return contentType;
-    }
-
-    public void setContentType(String contentType) {
-        this.contentType = contentType;
-    }
-
-    public String getPriority() {
-        return priority;
-    }
-
-    public void setPriority(String priority) {
-        this.priority = priority;
-    }
-}
-
-Caused by: com.fasterxml.jackson.databind.exc.MismatchedInputException: Cannot deserialize value of type `java.lang.String` from Object value (token `JsonToken.START_OBJECT`)
- at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); line: 1, column: 61] (through reference chain: com.scb.scroeconnect.emailworker.dto.EmailPayloadDTO["contentBody"])
-	at com.fasterxml.jackson.databind.exc.MismatchedInputExcep
+SLF4J(W): Class path contains multiple SLF4J providers.
+SLF4J(W): Found provider [ch.qos.logback.classic.spi.LogbackServiceProvider@2aafb23c]
+SLF4J(W): Found provider [org.apache.logging.slf4j.SLF4JServiceProvider@2b80d80f]
+SLF4J(W): See https://www.slf4j.org/codes.html#multiple_bindings for an explanation.
+SLF4J(I): Actual provider is of type [ch.qos.logback.classic.spi.LogbackServiceProvider@2aafb23c]
+12:10:06,686 |-INFO in ch.qos.logback.classic.LoggerContext[default] - This is logback-classic version 1.5.18
+12:10:06,697 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Here is a list of configurators discovered as a service, by rank: 
+12:10:06,697 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb -   org.springframework.boot.logging.logback.RootLogLevelConfigurator
+12:10:06,697 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - They will be invoked in order until ExecutionStatus.DO_NOT_INVOKE_NEXT_IF_ANY is returned.
+12:10:06,697 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Constructed configurator of type class org.springframework.boot.logging.logback.RootLogLevelConfigurator
+12:10:06,727 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - org.springframework.boot.logging.logback.RootLogLevelConfigurator.configure() call lasted 1 milliseconds. ExecutionStatus=INVOKE_NEXT_IF_ANY
+12:10:06,727 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Trying to configure with ch.qos.logback.classic.joran.SerializedModelConfigurator
+12:10:06,730 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Constructed configurator of type class ch.qos.logback.classic.joran.SerializedModelConfigurator
+12:10:06,742 |-INFO in ch.qos.logback.classic.LoggerContext[default] - Could NOT find resource [logback-test.scmo]
+12:10:06,743 |-INFO in ch.qos.logback.classic.LoggerContext[default] - Could NOT find resource [logback.scmo]
+12:10:06,743 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - ch.qos.logback.classic.joran.SerializedModelConfigurator.configure() call lasted 13 milliseconds. ExecutionStatus=INVOKE_NEXT_IF_ANY
+12:10:06,743 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Trying to configure with ch.qos.logback.classic.util.DefaultJoranConfigurator
+12:10:06,745 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Constructed configurator of type class ch.qos.logback.classic.util.DefaultJoranConfigurator
+12:10:06,747 |-INFO in ch.qos.logback.classic.LoggerContext[default] - Could NOT find resource [logback-test.xml]
+12:10:06,748 |-INFO in ch.qos.logback.classic.LoggerContext[default] - Could NOT find resource [logback.xml]
+12:10:06,748 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - ch.qos.logback.classic.util.DefaultJoranConfigurator.configure() call lasted 3 milliseconds. ExecutionStatus=INVOKE_NEXT_IF_ANY
+12:10:06,748 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Trying to configure with ch.qos.logback.classic.BasicConfigurator
+12:10:06,751 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - Constructed configurator of type class ch.qos.logback.classic.BasicConfigurator
+12:10:06,751 |-INFO in ch.qos.logback.classic.BasicConfigurator@479ceda0 - Setting up default configuration.
+12:10:06,825 |-INFO in ch.qos.logback.core.ConsoleAppender[console] - BEWARE: Writing to the console can be very slow. Avoid logging to the 
+12:10:06,825 |-INFO in ch.qos.logback.core.ConsoleAppender[console] - console in production environments, especially in high volume systems.
+12:10:06,825 |-INFO in ch.qos.logback.core.ConsoleAppender[console] - See also https://logback.qos.ch/codes.html#slowConsole
+12:10:06,827 |-INFO in ch.qos.logback.classic.util.ContextInitializer@573906eb - ch.qos.logback.classic.BasicConfigurator.configure() call lasted 76 milliseconds. ExecutionStatus=NEUTRAL
+12:10:08,171 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [Properties] in [ch.qos.logback.classic.LoggerContext]
+12:10:08,171 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [Appenders] in [ch.qos.logback.classic.LoggerContext]
+12:10:08,171 |-WARN in ch.qos.logback.core.model.processor.ImplicitModelHandler - Ignoring unknown property [Loggers] in [ch.qos.logback.classic.LoggerContext]
+12:10:08,173 |-INFO in ch.qos.logback.core.model.processor.DefaultProcessor@6d07a63d - End of configuration.
+12:10:08,174 |-INFO in org.springframework.boot.logging.logback.SpringBootJoranConfigurator@571c5681 - Registering current configuration as safe fallback point
