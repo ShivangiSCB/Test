@@ -1,74 +1,349 @@
-Can you put these 10, 20 and all in app.properties?
+Write testcases for the following classes with 100% Line coverage.
+
+package com.scb.scroeconnect.solaceworker.config;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import java.util.concurrent.Executor;
+
+@Configuration
+@EnableAsync
+@EnableScheduling
+@RequiredArgsConstructor
+public class AsyncSolaceConfig {
+
+    private final SolaceThreadProperties properties;
+
+    @Bean("solaceWorkerExecutor")
+    public Executor solaceWorkerExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(10);
-        executor.setMaxPoolSize(20);
-        executor.setQueueCapacity(200);
-        executor.setThreadNamePrefix("solace-worker-async");
+        executor.setCorePoolSize(properties.getCorePoolSize());
+        executor.setMaxPoolSize(properties.getMaxPoolSize());
+        executor.setQueueCapacity(properties.getQueueCapacity());
+        executor.setThreadNamePrefix(properties.getNamePrefix());
         executor.initialize();
         return executor;
-    
-        cachingFactory.setSessionCacheSize(10);
+    }
+}
 
-ALso for the below code where we are using setter, Can we create a util class, to make it more readable?
+package com.scb.scroeconnect.solaceworker.config;
 
-        String transformedPayload = connectNotificationDelivery.getTransformedPayload();
-        TransformedPayloadDto payload;
+import com.solacesystems.jms.SolConnectionFactory;
+import com.solacesystems.jms.SolJmsUtility;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jms.connection.CachingConnectionFactory;
+import org.springframework.jms.core.JmsTemplate;
+
+import java.util.Map;
+
+@Log4j2
+@Configuration
+public class SolaceConnectionConfig {
+
+    @Value("$solace.sessionCacheSize")
+    private int solaceCacheSize;
+
+    private final SolaceProperties solacePropertiesConstant;
+
+    public SolaceConnectionConfig(SolaceProperties solacePropertiesConstant) {
+        this.solacePropertiesConstant = solacePropertiesConstant;
+    }
+
+    @Bean
+    public SolConnectionFactory solConnectionFactory(SolaceProperties props) throws Exception {
+        Map<String, String> ssl = solacePropertiesConstant.getSsl();
+        Map<String, String> queue = solacePropertiesConstant.getQueue();
+
+        SolConnectionFactory cf = SolJmsUtility.createConnectionFactory();
+        cf.setVPN(queue.get("vpn"));
+        cf.setHost(queue.get("hostname"));
+        cf.setUsername(queue.get("username"));
+        cf.setPassword(queue.get("password"));
+        cf.setConnectRetries(solacePropertiesConstant.getConnectRetries());
+        cf.setConnectRetriesPerHost(solacePropertiesConstant.getConnectRetriesPerHost());
+        cf.setConnectTimeoutInMillis(solacePropertiesConstant.getConnectTimeoutInMillis());
+        cf.setClientID(queue.get("clientId"));
+
+        cf.setSSLTrustStore(ssl.get("truststorePath"));
+        cf.setSSLTrustStorePassword(ssl.get("truststorePassword"));
+        cf.setSSLTrustStoreFormat(ssl.get("truststoreType"));
+        cf.setSSLKeyStore(ssl.get("keystorePath"));
+        cf.setSSLKeyStorePassword(ssl.get("keystorePassword"));
+        cf.setSSLKeyStoreFormat(ssl.get("keystoreType"));
+        cf.setAuthenticationScheme("AUTHENTICATION_SCHEME_CLIENT_CERTIFICATE");
+
+        log.info("Solace Connection Factory created successfully");
+        return cf;
+    }
+
+    @Bean
+    public CachingConnectionFactory cachingConnectionFactory(SolConnectionFactory solConnectionFactory) {
+        CachingConnectionFactory cachingFactory = new CachingConnectionFactory(solConnectionFactory);
+        cachingFactory.setSessionCacheSize(solaceCacheSize);
+        return cachingFactory;
+    }
+
+    @Bean
+    public JmsTemplate jmsTemplate(CachingConnectionFactory cachingConnectionFactory) {
+        JmsTemplate jmsTemplate = new JmsTemplate(cachingConnectionFactory);
+        jmsTemplate.setPubSubDomain(true);
+        return jmsTemplate;
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.config;
+
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
+@Getter
+@Setter
+@Configuration
+@ConfigurationProperties(prefix = "solace.s2bl")
+public class SolaceThreadProperties {
+    private int corePoolSize;
+    private int maxPoolSize;
+    private int queueCapacity;
+    private String namePrefix;
+}
+
+package com.scb.scroeconnect.solaceworker.mapper;
+
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadHeaderDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import org.springframework.stereotype.Component;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+
+@Component
+public class FinalPayloadMapper {
+
+    public FinalPayloadDto buildFinalPayload(TransformedPayloadDto payload, ConnectNotificationDelivery delivery) {
+        FinalPayloadDto finalPayload = new FinalPayloadDto();
+        FinalPayloadHeaderDto header = buildHeader(payload, delivery);
+        FinalPayloadBodyDto body = buildBody(payload);
+        finalPayload.setHeader(header);
+        finalPayload.setData(List.of(body));
+        finalPayload.setTrailer(payload.getTrailer());
+
+        return finalPayload;
+    }
+
+    private FinalPayloadHeaderDto buildHeader(TransformedPayloadDto payload, ConnectNotificationDelivery delivery) {
+        FinalPayloadHeaderDto header = new FinalPayloadHeaderDto();
+        header.setNotificationType(payload.getHeader().getNotificationType());
+        header.setMessageId(delivery.getNotificationEvent().getEventId().toString());
+        OffsetDateTime now = OffsetDateTime.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
+        header.setInitiatedTimeStamp(now.format(formatter));
+
+        return header;
+    }
+
+    private FinalPayloadBodyDto buildBody(TransformedPayloadDto payload) {
+        TransformedBodyDto payloadBody = payload.getBody().get(0);
+        FinalPayloadBodyDto body = new FinalPayloadBodyDto();
+        body.setPhysicalAccountNbr(payloadBody.getPhysicalAccountNbr());
+        body.setAccountCurrency(payloadBody.getAccountCurrency());
+        body.setAccountCountry(payloadBody.getAccountCountry());
+        body.setVban(payloadBody.getVBAN());
+        body.setVaultNbr(payloadBody.getVaultNbr());
+        body.setAmount(String.valueOf(new BigDecimal(payloadBody.getAmount())));
+        body.setCrDrIndicator(payloadBody.getCrDrIndicator());
+        body.setTxnDate(String.valueOf(payloadBody.getTxnDate()));
+        body.setSourceChannelId(payloadBody.getSourceChannelId());
+        body.setTxnReferenceNo(payloadBody.getTxnReferenceNo());
+        body.setRelatedReferenceNo(payloadBody.getRelatedReferenceNo());
+        body.setRtaTrackingId(payloadBody.getRtaTrackingId());
+        body.setAppSeqNo(payloadBody.getAppSeqNo());
+        body.setCbValueDate(String.valueOf(payloadBody.getCbValueDate()));
+        body.setNarration1(payloadBody.getNarration1());
+        body.setNarration2(payloadBody.getNarration2());
+        body.setNarration3(payloadBody.getNarration3());
+        body.setNarration4(payloadBody.getNarration4());
+        body.setNarration5(payloadBody.getNarration5());
+        body.setNarration6(payloadBody.getNarration6());
+
+        return body;
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.service;
+
+import jakarta.jms.TextMessage;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jms.core.JmsTemplate;
+import org.springframework.stereotype.Service;
+
+@Log4j2
+@Service
+@RequiredArgsConstructor
+public class SolaceProducerService {
+
+    @Autowired
+    private final JmsTemplate jmsTemplate;
+
+    public void sendMessage(String topic, String payload, String eventId) {
+        jmsTemplate.send(topic, session -> {
+            TextMessage message = session.createTextMessage(payload);
+            message.setJMSCorrelationID(eventId);
+            message.setJMSMessageID(eventId);
+            message.setJMSTimestamp(System.currentTimeMillis());
+            log.info("JMS Message ID {}", message.getJMSMessageID());
+            return message;
+        });
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.service;
+
+import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.solaceworker.mapper.FinalPayloadMapper;
+import com.scb.scroeconnect.solaceworker.util.ParseTransformedPayloadUtil;
+import com.scb.scroeconnect.solaceworker.util.PublishToSolaceUtil;
+import com.scb.scroeconnect.solaceworker.util.RetryHandler;
+import com.scb.scroeconnect.solaceworker.util.SaveFinalPayloadUtil;
+import lombok.extern.log4j.Log4j2;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.util.UUID;
+
+@Log4j2
+@Service
+public class SolaceWorkerService {
+
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+    @Autowired
+    private final RetryHandler retryHandler;
+    private final PublishToSolaceUtil publishToSolace;
+    private final ParseTransformedPayloadUtil parseTransformedPayload;
+    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
+    private final FinalPayloadMapper finalPayloadMapper;
+
+    public SolaceWorkerService(ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository,
+                               SaveFinalPayloadUtil saveFinalPayloadUtil,
+                               RetryHandler retryHandler,
+                               FinalPayloadMapper finalPayloadMapper,
+                               PublishToSolaceUtil publishToSolace,
+                               ParseTransformedPayloadUtil parseTransformedPayload) {
+        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
+        this.retryHandler = retryHandler;
+        this.saveFinalPayloadUtil = saveFinalPayloadUtil;
+        this.finalPayloadMapper = finalPayloadMapper;
+        this.publishToSolace = publishToSolace;
+        this.parseTransformedPayload = parseTransformedPayload;
+    }
+
+    @Transactional
+    public void sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery) {
         try {
-            payload = objectMapper.readValue(transformedPayload, TransformedPayloadDto.class);
-        } catch (JsonProcessingException e) {
-            log.error("Error processing JSON: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to parse transformed payload", e);
-        }
-        try {
-            FinalPayloadDto finalPayload = new FinalPayloadDto();
-            FinalPayloadHeaderDto headerDto = new FinalPayloadHeaderDto();
-            FinalPayloadBodyDto bodyDto = new FinalPayloadBodyDto();
-
-            headerDto.setNotificationType(payload.getHeader().getNotificationType());
-            String messageId = connectNotificationDelivery.getNotificationEvent().getEventId().toString();
-            headerDto.setMessageId(messageId);
-            OffsetDateTime now = OffsetDateTime.now();
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
-            headerDto.setInitiatedTimeStamp(now.format(formatter));
-            finalPayload.setHeader(headerDto);
-            TransformedBodyDto payloadBody = payload.getBody().get(0);
-            bodyDto.setPhysicalAccountNbr(payloadBody.getPhysicalAccountNbr());
-            bodyDto.setAccountCurrency(payloadBody.getAccountCurrency());
-            bodyDto.setAccountCountry(payloadBody.getAccountCountry());
-            bodyDto.setVban(payloadBody.getVBAN());
-            bodyDto.setVaultNbr(payloadBody.getVaultNbr());
-            bodyDto.setAmount(String.valueOf(new BigDecimal(payloadBody.getAmount())));
-            bodyDto.setCrDrIndicator(payloadBody.getCrDrIndicator());
-            bodyDto.setTxnDate(String.valueOf(payloadBody.getTxnDate()));
-            bodyDto.setSourceChannelId(payloadBody.getSourceChannelId());
-            bodyDto.setTxnReferenceNo(payloadBody.getTxnReferenceNo());
-            bodyDto.setRelatedReferenceNo(payloadBody.getRelatedReferenceNo());
-            bodyDto.setRtaTrackingId(payloadBody.getRtaTrackingId());
-            bodyDto.setAppSeqNo(payloadBody.getAppSeqNo());
-            bodyDto.setCbValueDate(String.valueOf(payloadBody.getCbValueDate()));
-            bodyDto.setNarration1(payloadBody.getNarration1());
-            bodyDto.setNarration2(payloadBody.getNarration2());
-            bodyDto.setNarration3(payloadBody.getNarration3());
-            bodyDto.setNarration4(payloadBody.getNarration4());
-            bodyDto.setNarration5(payloadBody.getNarration5());
-            bodyDto.setNarration6(payloadBody.getNarration6());
-
-            finalPayload.setData(List.of(bodyDto));
-            finalPayload.setTrailer(payload.getTrailer());
-
+            log.info("Processing Solace Notification for Delivery ID: {}", connectNotificationDelivery.getId());
+            String transformedPayload = connectNotificationDelivery.getTransformedPayload();
+            TransformedPayloadDto payload = parseTransformedPayload.parseTransformedPayload(transformedPayload);
+            FinalPayloadDto finalPayload = finalPayloadMapper.buildFinalPayload(payload, connectNotificationDelivery);
             Long recipientId = connectNotificationDelivery.getRecipient().getId();
-            boolean publish = publishToSolace(finalPayload, recipientId, connectNotificationDelivery.getNotificationEvent().getEventId());
+            UUID eventId = connectNotificationDelivery.getNotificationEvent().getEventId();
+            boolean publish = publishToSolace.publishToSolace(finalPayload, recipientId, eventId);
+
             if (publish) {
                 log.info("Solace Notification sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
                 connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
                 saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery, finalPayload);
 
             } else {
-                log.error("Failed to send Solace Notification delivery ID: {}", connectNotificationDelivery.getId());
+                log.error("ALERT TO PSS:- Failed to send Solace Notification delivery ID: {}", connectNotificationDelivery.getId());
                 retryHandler.handleFailure(connectNotificationDelivery);
             }
+
         } catch (Exception e) {
-            log.error("Failed to send Solace Notification: {}", e.getMessage());
-            throw new RuntimeException("Failed to send Solace Notification: ", e);
+            log.error("ALERT TO PSS:- Failed to send Solace Notification: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to send Solace Notification", e);
         }
+    }
+
+}
+
+package com.scb.scroeconnect.solaceworker.util;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.stereotype.Component;
+
+@Component
+@Log4j2
+@RequiredArgsConstructor
+public class ParseTransformedPayloadUtil {
+    private final ObjectMapper objectMapper;
+
+    public TransformedPayloadDto parseTransformedPayload(String transformedPayload) {
+        try {
+            return objectMapper.readValue(transformedPayload, TransformedPayloadDto.class);
+        } catch (JsonProcessingException e) {
+            log.error("Error parsing transformed payload: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to parse transformed payload", e);
+        }
+    }
+}
+
+package com.scb.scroeconnect.solaceworker.util;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scb.scroeconnect.solaceworker.config.SolaceProperties;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
+import com.scb.scroeconnect.solaceworker.service.SolaceProducerService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.stereotype.Component;
+
+import java.util.UUID;
+
+@Component
+@Log4j2
+@RequiredArgsConstructor
+public class PublishToSolaceUtil {
+
+    private final ObjectMapper objectMapper;
+    private final SolaceProducerService solaceConnectionConfig;
+    private final SolaceProperties solaceProperties;
+
+    public boolean publishToSolace(FinalPayloadDto finalPayload, Long recipientId, UUID eventId) {
+        try {
+            String message = objectMapper.writeValueAsString(finalPayload);
+            log.info("Solace Final Payload Message : {}", message);
+            log.info("Get Topic {}", solaceProperties.getTopic());
+            solaceConnectionConfig.sendMessage(solaceProperties.getTopic(), message, eventId.toString());
+            return true;
+        } catch (Exception e) {
+            log.error("Exception while sending Solace Notification: {} For Recipient Id: {}", e, recipientId);
+            throw new RuntimeException("Exception while sending Solace Notification: " + e + "For Recipient Id: " + recipientId);
+        }
+    }
+}
 
