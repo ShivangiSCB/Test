@@ -1,9 +1,45 @@
+package com.scb.scroeconnect.solaceworker.util;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scb.scroeconnect.solaceworker.config.SolaceProperties;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
+import com.scb.scroeconnect.solaceworker.service.SolaceProducerService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.stereotype.Component;
+
+import java.util.UUID;
+
+@Component
+@Log4j2
+@RequiredArgsConstructor
+public class PublishToSolaceUtil {
+
+    private final ObjectMapper objectMapper;
+    private final SolaceProducerService solaceConnectionConfig;
+    private final SolaceProperties solaceProperties;
+
+    public boolean publishToSolace(FinalPayloadDto finalPayload, Long recipientId, UUID eventId) {
+        try {
+            String message = objectMapper.writeValueAsString(finalPayload);
+            log.info("Solace Final Payload Message : {}", message);
+            log.info("Get Topic {}", solaceProperties.getTopic());
+            solaceConnectionConfig.sendMessage(solaceProperties.getTopic(), message, eventId.toString());
+            return true;
+        } catch (Exception e) {
+            log.error("Exception occurred while sending Solace Notification: {} For Recipient Id: {}", e, recipientId);
+            return false;
+        }
+    }
+}
+
 package com.scb.scroeconnect.solaceworker.config;
 
 import com.solacesystems.jms.SolConnectionFactory;
 import com.solacesystems.jms.SolJmsUtility;
+import jakarta.annotation.PreDestroy;
+import jakarta.jms.DeliveryMode;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jms.connection.CachingConnectionFactory;
@@ -14,29 +50,56 @@ import java.util.Map;
 @Log4j2
 @Configuration
 public class SolaceConnectionConfig {
+
     private final SolaceProperties solacePropertiesConstant;
     private final SolaceThreadProperties solaceThreadProperties;
 
-    public SolaceConnectionConfig(SolaceProperties solacePropertiesConstant, SolaceThreadProperties solaceThreadProperties) {
+    /**
+     * Held as a field so @PreDestroy can destroy it on application shutdown,
+     * flushing cached sessions and closing the underlying Solace connection cleanly.
+     */
+    private CachingConnectionFactory cachingConnectionFactory;
+
+    public SolaceConnectionConfig(SolaceProperties solacePropertiesConstant,
+                                  SolaceThreadProperties solaceThreadProperties) {
         this.solacePropertiesConstant = solacePropertiesConstant;
         this.solaceThreadProperties = solaceThreadProperties;
     }
 
     @Bean
-    public SolConnectionFactory solConnectionFactory(SolaceProperties props) throws Exception {
+    public SolConnectionFactory solConnectionFactory() throws Exception {
         Map<String, String> ssl = solacePropertiesConstant.getSsl();
         Map<String, String> queue = solacePropertiesConstant.getQueue();
 
         SolConnectionFactory cf = SolJmsUtility.createConnectionFactory();
+
+        // --- Basic connection ---
         cf.setVPN(queue.get("vpn"));
-        cf.setHost(queue.get("hostname"));
+        cf.setHost(queue.get("hostname")); // supports HA: "host1,host2"
         cf.setUsername(queue.get("username"));
         cf.setPassword(queue.get("password"));
+        cf.setClientID(queue.get("clientId"));
+
+        // --- Initial connection retries ---
+        // Retries when first establishing a connection on app startup.
         cf.setConnectRetries(solacePropertiesConstant.getConnectRetries());
         cf.setConnectRetriesPerHost(solacePropertiesConstant.getConnectRetriesPerHost());
         cf.setConnectTimeoutInMillis(solacePropertiesConstant.getConnectTimeoutInMillis());
-        cf.setClientID(queue.get("clientId"));
 
+        // --- Reconnect settings (transport/TCP layer) ---
+        // Handles reconnection after a LIVE connection drops (broker restart, network blip).
+        // 60 retries * 3000ms wait = up to 3 minutes of reconnect attempts before giving up.
+        // This is separate from Spring's CachingConnectionFactory.reconnectOnException —
+        // Solace handles the physical TCP wire; Spring handles stale cached session eviction.
+        cf.setReconnectRetries(solacePropertiesConstant.getReconnectRetries());
+        cf.setReconnectRetryWaitInMillis(solacePropertiesConstant.getReconnectRetryWaitInMillis());
+
+        // --- Keep-alive / heartbeat ---
+        // Detects silently dead connections (e.g. firewall silently drops idle TCP).
+        // Solace API only exposes the interval — the limit/threshold is broker-side config.
+        cf.setKeepAliveIntervalInMillis(solacePropertiesConstant.getKeepAliveIntervalInMillis());
+
+        // --- SSL / mTLS ---
         cf.setSSLTrustStore(ssl.get("truststorePath"));
         cf.setSSLTrustStorePassword(ssl.get("truststorePassword"));
         cf.setSSLTrustStoreFormat(ssl.get("truststoreType"));
@@ -52,46 +115,70 @@ public class SolaceConnectionConfig {
     @Bean
     public CachingConnectionFactory cachingConnectionFactory(SolConnectionFactory solConnectionFactory) {
         CachingConnectionFactory cachingFactory = new CachingConnectionFactory(solConnectionFactory);
+
+        // --- Session cache ---
+        // Sessions and Producers are NOT shared across threads. CachingConnectionFactory
+        // is a borrow/return pool: each thread exclusively borrows one Session for the
+        // duration of a send(), then returns it. Two threads never share the same Session.
+        // sessionCacheSize = max concurrent sessions = should match executor thread pool size.
         cachingFactory.setSessionCacheSize(solaceThreadProperties.getCacheSize());
+
+        // Cache MessageProducers per session — avoids recreating them on every send().
+        // Same borrow/return guarantee: one producer per session, one session per thread.
+        cachingFactory.setCacheProducers(true);
+
+        // --- Stale session eviction (Spring cache layer) ---
+        // Even after Solace reconnects the TCP wire, old Session objects in the cache
+        // are stale (created before the disconnect). Without this, threads keep borrowing
+        // broken sessions. With this, a JMSException causes the broken session to be
+        // evicted and a fresh one created on the new connection.
+        // Works in conjunction with Solace-level reconnect — they solve different layers.
+        cachingFactory.setReconnectOnException(true);
+
+        this.cachingConnectionFactory = cachingFactory;
         return cachingFactory;
     }
 
     @Bean
     public JmsTemplate jmsTemplate(CachingConnectionFactory cachingConnectionFactory) {
         JmsTemplate jmsTemplate = new JmsTemplate(cachingConnectionFactory);
+
+        // true = publish to Topic destination; false = Queue.
+        // Even though durability lives inside broker-side queues that subscribe to topics,
+        // the producer MUST address a Topic object (not a Queue object). Without this,
+        // JmsTemplate calls session.createQueue() instead of session.createTopic(),
+        // and Solace treats it as a direct queue lookup — wrong destination type.
         jmsTemplate.setPubSubDomain(true);
+
+        // PERSISTENT delivery mode: broker writes message to durable store BEFORE
+        // routing to subscribed queues and before acking the producer.
+        // If broker crashes mid-route, message is recovered from store.
+        // NON_PERSISTENT (default) messages are NOT spooled into subscribed queues on Solace —
+        // even if the target queues are durable, a non-persistent inbound message is dropped
+        // on broker failure before it reaches the queue.
+        jmsTemplate.setDeliveryMode(DeliveryMode.PERSISTENT);
+
+        // explicitQosEnabled=true tells JmsTemplate to explicitly pass deliveryMode,
+        // priority, and timeToLive into every producer.send(...) call.
+        // Without this, setDeliveryMode() above is SILENTLY IGNORED and Solace defaults apply.
+        // TTL is not set here (defaults to 0 = never expires) — messages live until consumed.
+        // Priority is not set here (defaults to 4 = normal) — all messages equally important.
+        jmsTemplate.setExplicitQosEnabled(true);
+
         return jmsTemplate;
     }
-}
 
-
-package com.scb.scroeconnect.solaceworker.config;
-
-import lombok.RequiredArgsConstructor;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.EnableAsync;
-import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-
-import java.util.concurrent.Executor;
-
-@Configuration
-@EnableAsync
-@EnableScheduling
-@RequiredArgsConstructor
-public class AsyncSolaceConfig {
-
-    private final SolaceThreadProperties properties;
-
-    @Bean("solaceWorkerExecutor")
-    public Executor solaceWorkerExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(properties.getCorePoolSize());
-        executor.setMaxPoolSize(properties.getMaxPoolSize());
-        executor.setQueueCapacity(properties.getQueueCapacity());
-        executor.setThreadNamePrefix(properties.getNamePrefix());
-        executor.initialize();
-        return executor;
+    /**
+     * Graceful shutdown on application stop.
+     * Destroys CachingConnectionFactory: flushes all cached sessions and closes
+     * the underlying Solace connection cleanly, preventing message loss on shutdown.
+     */
+    @PreDestroy
+    public void shutdown() {
+        if (cachingConnectionFactory != null) {
+            log.info("Shutting down CachingConnectionFactory gracefully...");
+            cachingConnectionFactory.destroy();
+            log.info("CachingConnectionFactory shutdown complete.");
+        }
     }
 }
