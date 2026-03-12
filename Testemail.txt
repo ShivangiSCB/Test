@@ -1,279 +1,112 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.13</version>
-        <relativePath/> <!-- lookup parent from repository -->
-    </parent>
-    <groupId>com.scb.scroeconnect</groupId>
-    <artifactId>scroe-connect-notification-delivery-solace</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
-    <name>scroe-connect-notification-delivery-solace</name>
-    <description>Solace Worker</description>
-    <properties>
-        <java.version>17</java.version>
-    </properties>
-    <dependencies>
+package com.scb.scroeconnect.solaceworker.util;
 
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.tomcat.embed</groupId>
-                    <artifactId>tomcat-embed-core</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
-        <dependency>
-            <groupId>org.apache.tomcat.embed</groupId>
-            <artifactId>tomcat-embed-core</artifactId>
-            <version>10.1.50</version>
-        </dependency>
+import java.util.Date;
 
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.springframework.boot</groupId>
-                    <artifactId>spring-boot-starter-logging</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
+@Log4j2
+@Component
+public class RetryHandler {
 
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jpa</artifactId>
-        </dependency>
+    @Value("${app.worker.max-retries}")
+    private int solaceMaxRetries;
 
-        <dependency>
-            <groupId>com.solace.spring.boot</groupId>
-            <artifactId>solace-jms-spring-boot-starter</artifactId>
-            <version>5.1.0</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>ch.qos.logback</groupId>
-                    <artifactId>logback-core</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
+    @Value("${app.worker.base-backoff-seconds}")
+    private int solaceBackOffSec;
 
-        <dependency>
-            <groupId>ch.qos.logback</groupId>
-            <artifactId>logback-core</artifactId>
-            <version>1.5.19</version>
-        </dependency>
+    @Autowired
+    ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
 
-        <dependency>
-            <groupId>com.solacesystems</groupId>
-            <artifactId>sol-jms</artifactId>
-            <version>10.24.0</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>io.netty</groupId>
-                    <artifactId>netty-codec</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
+    public void handleFailure(ConnectNotificationDelivery delivery) {
+        int nextRetry = delivery.getRetryCount() + 1;
+        if (nextRetry > solaceMaxRetries) {
+            log.error("ALERT TO PSS, Max retry limit reached for delivery ID: {}", delivery.getId());
+            connectNotificationDeliveryRepository.updateStatusFailedById(delivery.getId());
+            return;
+        }
+        Date nextRetryTime = calculateBackoff(nextRetry);
+        connectNotificationDeliveryRepository.updateStatusAndRetryById(delivery.getId(), DeliveryStatus.RETRY.name(), nextRetryTime);
+    }
+    public Date calculateBackoff(int retryCount) {
+        long delaySeconds = (long) Math.pow(2, retryCount) * solaceBackOffSec;
+        return new Date(System.currentTimeMillis() + delaySeconds * 1000);
+    }
+}
 
-        <dependency>
-            <groupId>io.netty</groupId>
-            <artifactId>netty-codec</artifactId>
-            <version>4.1.127.Final</version>
-        </dependency>
+package com.scb.scroeconnect.solaceworker.mapper;
 
-        <dependency>
-            <groupId>org.springframework</groupId>
-            <artifactId>spring-jms</artifactId>
-            <version>7.0.5</version>
-        </dependency>
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadHeaderDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import org.springframework.stereotype.Component;
 
-        <dependency>
-            <groupId>com.fasterxml.jackson.datatype</groupId>
-            <artifactId>jackson-datatype-jsr310</artifactId>
-        </dependency>
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.UUID;
 
-        <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-            <version>42.7.8</version>
-        </dependency>
+@Component
+public class FinalPayloadMapper {
 
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-            <optional>true</optional>
-        </dependency>
+    public FinalPayloadDto buildFinalPayload(TransformedPayloadDto payload, ConnectNotificationDelivery delivery) {
+        FinalPayloadDto finalPayload = new FinalPayloadDto();
+        FinalPayloadHeaderDto header = buildHeader(payload, delivery);
+        FinalPayloadBodyDto body = buildBody(payload);
+        finalPayload.setHeader(header);
+        finalPayload.setData(List.of(body));
+        finalPayload.setTrailer(payload.getTrailer());
 
-        <dependency>
-            <groupId>org.springframework.retry</groupId>
-            <artifactId>spring-retry</artifactId>
-            <version>2.0.12</version>
-        </dependency>
+        return finalPayload;
+    }
 
-        <!-- Liquidity Core Database -->
-        <dependency>
-            <groupId>com.scb.liquidity</groupId>
-            <artifactId>liquidity-core-database</artifactId>
-            <version>1.0.46</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.hazelcast</groupId>
-                    <artifactId>hazelcast</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.kafka</groupId>
-                    <artifactId>kafka-clients</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
+    private FinalPayloadHeaderDto buildHeader(TransformedPayloadDto payload, ConnectNotificationDelivery delivery) {
+        FinalPayloadHeaderDto header = new FinalPayloadHeaderDto();
+        String crDrIndicator = payload.getBody().get(0).getCrDrIndicator();
+        String msgId = UUID.randomUUID() + crDrIndicator;
+        header.setNotificationType(payload.getHeader().getNotificationType());
+        header.setMessageId(msgId);
+        OffsetDateTime now = OffsetDateTime.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
+        header.setInitiatedTimeStamp(now.format(formatter));
 
-        <dependency>
-            <groupId>org.apache.kafka</groupId>
-            <artifactId>kafka-clients</artifactId>
-            <version>3.9.2</version>
-        </dependency>
+        return header;
+    }
 
-        <dependency>
-            <groupId>com.hazelcast</groupId>
-            <artifactId>hazelcast</artifactId>
-            <version>5.5.0</version>
-        </dependency>
+    private FinalPayloadBodyDto buildBody(TransformedPayloadDto payload) {
+        TransformedBodyDto payloadBody = payload.getBody().get(0);
+        FinalPayloadBodyDto body = new FinalPayloadBodyDto();
+        body.setPhysicalAccountNbr(payloadBody.getPhysicalAccountNbr());
+        body.setAccountCurrency(payloadBody.getAccountCurrency());
+        body.setAccountCountry(payloadBody.getAccountCountry());
+        body.setVban(payloadBody.getVBAN());
+        body.setVaultNbr(payloadBody.getVaultNbr());
+        body.setAmount(String.valueOf(new BigDecimal(payloadBody.getAmount())));
+        body.setCrDrIndicator(payloadBody.getCrDrIndicator());
+        body.setTxnDate(String.valueOf(payloadBody.getTxnDate()));
+        body.setSourceChannelId(payloadBody.getSourceChannelId());
+        body.setTxnReferenceNo(payloadBody.getTxnReferenceNo());
+        body.setRelatedReferenceNo(payloadBody.getRelatedReferenceNo());
+        body.setRtaTrackingId(payloadBody.getRtaTrackingId());
+        body.setAppSeqNo(payloadBody.getAppSeqNo());
+        body.setCbValueDate(String.valueOf(payloadBody.getCbValueDate()));
+        body.setNarration1(payloadBody.getNarration1());
+        body.setNarration2(payloadBody.getNarration2());
+        body.setNarration3(payloadBody.getNarration3());
+        body.setNarration4(payloadBody.getNarration4());
+        body.setNarration5(payloadBody.getNarration5());
+        body.setNarration6(payloadBody.getNarration6());
 
-        <dependency>
-            <groupId>com.scb.liquidity</groupId>
-            <artifactId>liquidity-core-messaging</artifactId>
-            <version>1.0.46</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-log4j2</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-layout-template-json</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.springframework</groupId>
-                    <artifactId>spring-core</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework</groupId>
-            <artifactId>spring-core</artifactId>
-            <version>6.2.12</version>
-        </dependency>
-
-    </dependencies>
-
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>org.apache.logging.log4j</groupId>
-                <artifactId>log4j-bom</artifactId>
-                <version>2.24.3</version>
-                <scope>import</scope>
-                <type>pom</type>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <excludes>
-                        <exclude>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </exclude>
-                    </excludes>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.1.2</version>
-                <configuration>
-                    <useModulePath>false</useModulePath>
-                    <includes>
-                        <include>**/*Test.java</include>
-                        <include>**/*Tests.java</include>
-                        <include>**/Test*.java</include>
-                    </includes>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.8</version>
-                <executions>
-                    <execution>
-                        <id>pre-unit-test</id>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
-                        <configuration>
-                            <destFile>${project.build.directory}/coverage-reports/jacoco-ut.exec</destFile>
-                            <propertyName>surefireArgLine</propertyName>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>post-unit-test</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
-                        <configuration>
-                            <dataFile>${project.build.directory}/coverage-reports/jacoco-ut.exec</dataFile>
-                            <outputDirectory>${project.reporting.outputDirectory}/jacoco-ut</outputDirectory>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
-</project>
-
-Vulnerabilites:
-com.fasterxml.jackson.datatype : jackson-datatype-jdk8 : 2.17.3
-com.fasterxml.jackson.module : jackson-module-parameter-names : 2.17.3
-com.fasterxml.jackson.datatype : jackson-datatype-jsr310 : 2.17.3
-com.ibm.mq : com.ibm.mq.jakarta.client : 9.3.3.1
-Suggested Version Change
-Upgrade to 2.18.6
-Dependency Tree
-51241__TBQPR__51241-scroe-connect-notification-delivery-solace
-com.fasterxml.jackson.datatype : jackson-datatype-jdk8 : 2.17.3
-com.fasterxml.jackson.core : jackson-core : 2.17.3
-com.fasterxml.jackson.core : jackson-databind : 2.17.3
-com.fasterxml.jackson.core : jackson-core : 2.17.3
-com.fasterxml.jackson.module : jackson-module-parameter-names : 2.17.3
-com.fasterxml.jackson.core : jackson-core : 2.17.3
-com.fasterxml.jackson.datatype : jackson-datatype-jsr310 : 2.17.3
-com.fasterxml.jackson.core : jackson-core : 2.17.3
-com.ibm.mq : com.ibm.mq.jakarta.client : 9.3.3.1
-com.fasterxml.jackson.core : jackson-core : 2.17.3
+        return body;
+    }
+}
