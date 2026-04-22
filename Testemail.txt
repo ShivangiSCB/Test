@@ -1,172 +1,25 @@
-package com.scb.scroeconnect.solaceworker.converter;
+package com.scb.scroeconnect.solaceworker.util;
 
-import jakarta.persistence.AttributeConverter;
-import jakarta.persistence.Converter;
-import lombok.AllArgsConstructor;
-import org.postgresql.util.PGobject;
-import org.springframework.beans.factory.annotation.Autowired;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.stereotype.Component;
 
-@AllArgsConstructor
-@Converter
-public class JsonNodeConverter implements AttributeConverter<JsonNode, Object> {
-
-    @Autowired
+@Component
+@Log4j2
+@RequiredArgsConstructor
+public class ParseTransformedPayloadUtil {
     private final ObjectMapper objectMapper;
 
-    @Override
-    public Object convertToDatabaseColumn(JsonNode attribute) {
-        if (attribute == null) return null;
-        try {
-            PGobject pgObject = new PGobject();
-            pgObject.setType("jsonb");               // ← tells JDBC: send as jsonb
-            pgObject.setValue(attribute.toString()); // ← serialize JsonNode to JSON string
-            return pgObject;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize JsonNode to jsonb", e);
-        }
-    }
-
-    @Override
-    public JsonNode convertToEntityAttribute(Object dbData) {
-        if (dbData == null) return null;
-        try {
-            String json = (dbData instanceof PGobject)
-                    ? ((PGobject) dbData).getValue()
-                    : dbData.toString();
-            return objectMapper.readTree(json);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to deserialize JSON from DB column", e);
+    public TransformedPayloadDto parseTransformedPayload(String transformedPayload) {
+        try{
+            return objectMapper.readValue(transformedPayload, TransformedPayloadDto.class);
+        }catch(RuntimeException e) {
+            log.error("ALERT TO PSS, Error parsing transformed payload: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to parse transformed payload", e);
         }
     }
 }
 
-package com.scb.scroeconnect.solaceworker.entity;
-
-
-import com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter;
-import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
-import tools.jackson.databind.JsonNode;
-
-import java.sql.Timestamp;
-import java.time.ZonedDateTime;
-
-@Entity
-@Getter
-@Setter
-@Table(name = "connect_notification_delivery")
-public class ConnectNotificationDelivery extends BaseEntity {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "event_id",referencedColumnName = "event_id",nullable = false)
-    private NotificationEvent notificationEvent;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "recipient_id", nullable = false)
-    private Recipient recipient;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "template_id", nullable = false)
-    private NotificationTemplate notificationTemplate;
-
-    @Column(name = "delivery_mode", nullable = false)
-    private String deliveryMode;
-
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "jsonb")
-    private JsonNode payload;
-
-    @Column(nullable = false)
-    private String status;
-
-    @Column(name = "retry_count", nullable = false)
-    private int retryCount;
-
-    @Column(name = "available_at", nullable = false)
-    private ZonedDateTime availableAt;
-
-}
-
-These are the above changes changed String payload to JsonNode payload. And to read data I have created JsonNodeConverter.
-Now according to the above changes do the changes in the service code as well:
-
-package com.scb.scroeconnect.solaceworker.service;
-
-import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.solaceworker.mapper.FinalPayloadMapper;
-import com.scb.scroeconnect.solaceworker.util.ParseTransformedPayloadUtil;
-import com.scb.scroeconnect.solaceworker.util.PublishToSolaceUtil;
-import com.scb.scroeconnect.solaceworker.util.RetryHandler;
-import com.scb.scroeconnect.solaceworker.util.SaveFinalPayloadUtil;
-import lombok.extern.log4j.Log4j2;
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
-import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import java.util.UUID;
-
-@Log4j2
-@Service
-public class SolaceWorkerService {
-
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    @Autowired
-    private final RetryHandler retryHandler;
-    private final PublishToSolaceUtil publishToSolace;
-    private final ParseTransformedPayloadUtil parseTransformedPayload;
-    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
-    private final FinalPayloadMapper finalPayloadMapper;
-
-    public SolaceWorkerService(ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository,
-                               SaveFinalPayloadUtil saveFinalPayloadUtil,
-                               RetryHandler retryHandler,
-                               FinalPayloadMapper finalPayloadMapper,
-                               PublishToSolaceUtil publishToSolace,
-                               ParseTransformedPayloadUtil parseTransformedPayload) {
-        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
-        this.retryHandler = retryHandler;
-        this.saveFinalPayloadUtil = saveFinalPayloadUtil;
-        this.finalPayloadMapper = finalPayloadMapper;
-        this.publishToSolace = publishToSolace;
-        this.parseTransformedPayload = parseTransformedPayload;
-    }
-
-    @Transactional
-    public void sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery) {
-        try {
-            log.info("Processing Solace Notification for Delivery ID: {}", connectNotificationDelivery.getId());
-            String transformedPayload = connectNotificationDelivery.getPayload();
-            TransformedPayloadDto payload = parseTransformedPayload.parseTransformedPayload(transformedPayload);
-            FinalPayloadDto finalPayload = finalPayloadMapper.buildFinalPayload(payload, connectNotificationDelivery);
-            Long recipientId = connectNotificationDelivery.getRecipient().getId();
-            UUID eventId = connectNotificationDelivery.getNotificationEvent().getEventId();
-            boolean publish = publishToSolace.publishToSolace(finalPayload, recipientId, eventId);
-
-            if (publish) {
-                log.info("Solace Notification sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
-                connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
-                saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery, finalPayload, "Solace");
-
-            } else {
-                log.error("Failed to send Solace Notification delivery ID: {}, Implementing Retry Block", connectNotificationDelivery.getId());
-                retryHandler.handleFailure(connectNotificationDelivery);
-            }
-            // where is retry on this error?
-            // Not needed as handleFailure is already handled in the else block and parsing the payload is not a retryable exception as it is a data issue which needs to be fixed at the source.
-
-        } catch (Exception e) {
-            log.error("ALERT TO PSS:- Failed to send Solace Notification: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to send Solace Notification", e);
-        }
-    }
-
-}
+In ParseTransformedPayloadUtil it is String, but need JsonNode, is it required? Please tell me the changes
