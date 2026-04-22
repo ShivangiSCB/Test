@@ -1,25 +1,269 @@
-package com.scb.scroeconnect.solaceworker.util;
+So below is my generic payload:
+  	{
+    "header": {
+        "clientGroupId": "S2BGropuID",
+        "ScroeClientId": "ScroeClientId",
+        "webhookType": "PaaS_Webhook"   
+		"messageId": "messageId"
+    },
+	"data": {
+	"dealRefId": "SG-ES-02-20012",  //optional field
+	"dealCountry": "AE",
+	"eventType":"Vault_Status_Change" //notified whenever party vault is inactivated due to party inactive OR party vault closed due to party offboard
+										//OR party/txn vault is blocked by Ops due to screening
+										//can we write logic to only send notification when the status change is NOT via "vault status change API"?
+	"eventDetails": "{
+		"VaultName": "",
+		"vaultNo": "",
+		"accountNumber": "",    //Since clients may not maintain Tree Number at their end, account details are also mentioned
+		"accountCurrency": "",
+		"accountCountry": "",
+		"treeNumber": "",         // or should we give country and currency instead of tree number?
+		"vaultStatus": "blocked" //can be either inactive/blocked/closed/active
+								// Vault status change description: This is not captured in DB. Needs a table change to have description in webhook.
+		"vaName": "",
+		"vaNumber": "",
+		"vaIBAN": "",    //Optional field
+		"partyRefId": "" //Optional field. populated only for party vault
+	}"
+	}
+}
 
-import tools.jackson.databind.ObjectMapper;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.stereotype.Component;
-
-@Component
-@Log4j2
-@RequiredArgsConstructor
-public class ParseTransformedPayloadUtil {
-    private final ObjectMapper objectMapper;
-
-    public TransformedPayloadDto parseTransformedPayload(String transformedPayload) {
-        try{
-            return objectMapper.readValue(transformedPayload, TransformedPayloadDto.class);
-        }catch(RuntimeException e) {
-            log.error("ALERT TO PSS, Error parsing transformed payload: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to parse transformed payload", e);
-        }
+Below is my stored payload in DB:
+{
+    "data": {
+        "dealRefId": "SG-ES-02-20012",
+        "eventType": "Vault_Status_Change",
+        "dealCountry": "AE",
+        "eventDetails": "{
+            "vaultName":"MainVault",
+            "vaultNo":"VLT-001",
+            "accountNumber":"1234567890",
+            "accountCurrency":"AED",
+            "accountCountry":"AE",
+            "treeNumber":"TREE-01",
+            "vaultStatus":"ACTIVE",
+            "vaName":"Primary VA",
+            "vaNumber":"VA-0001",
+            "vaIBAN":"AE070331234567890123456",
+            "partyRefId":"PR-100"
+        }"
+    },
+    "header": {
+        "webhookType": "PaaS_Webhook",
+        "ScroeClientId": "VAAS",
+        "clientGroupId": "CG-98765"
     }
 }
 
-In ParseTransformedPayloadUtil it is String, but need JsonNode, is it required? Please tell me the changes
+Now while sending to Solace topic I need to remove escape characters from eventDetails and also remove after eventDetails:"{ .some data.... }"
+
+package com.scb.scroeconnect.solaceworker.mapper;
+
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.*;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedWebhookBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedWebhookPayloadDto;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.UUID;
+
+@Component
+public class FinalWebhookPayloadMapper {
+
+    public FinalWebhookPayloadDto buildFinalPayload(TransformedWebhookPayloadDto payload, ConnectNotificationDelivery delivery) {
+        FinalWebhookPayloadDto finalPayload = new FinalWebhookPayloadDto();
+        FinalWebhookHeaderDto header = buildHeader(payload, delivery);
+        FinalWebhookBodyDto body = buildBody(payload);
+        finalPayload.setHeader(header);
+        finalPayload.setData(List.of(body));
+        return finalPayload;
+    }
+
+    private FinalWebhookHeaderDto buildHeader(TransformedWebhookPayloadDto payload, ConnectNotificationDelivery delivery) {
+        FinalWebhookHeaderDto header = new FinalWebhookHeaderDto();
+        String msgId = String.valueOf(UUID.randomUUID());
+        header.setScroeClientId(payload.getHeader().getScroeClientId());
+        header.setWebhookType(payload.getHeader().getWebhookType());
+        header.setClientGroupId(payload.getHeader().getClientGroupId());
+        header.setMessageId(msgId);
+        return header;
+    }
+
+    private FinalWebhookBodyDto buildBody(TransformedWebhookPayloadDto payload) {
+        TransformedWebhookBodyDto payloadBody = payload.getBody().get(0);
+        FinalWebhookBodyDto body = new FinalWebhookBodyDto();
+        String eventDetails = payloadBody.getEventDetails();
+        body.setDealRefId(payloadBody.getDealRefId());
+        body.setEventType(payloadBody.getEventType());
+        body.setDealCountry(payloadBody.getDealCountry());
+        body.setEventDetails();
+        return body;
+    }
+}
+
+Now in Worker Service I want to send 2 payload differently:
+1) For Solace recipientId is 1 and payload is finalPayloadMapper
+2) For Webhook recipientId is 2 and payload is finalWebhookPayloadMapper
+So do the code changes accordingly:
+
+package com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto;
+
+import lombok.Data;
+import com.scb.scroeconnect.solaceworker.dto.TrailerDto;
+
+import java.util.List;
+
+@Data
+public class FinalPayloadDto {
+
+    private FinalPayloadHeaderDto header;
+    private List<FinalPayloadBodyDto> data;
+    private TrailerDto trailer;
+}
+
+package com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto;
+
+import lombok.Data;
+import com.scb.scroeconnect.solaceworker.dto.TrailerDto;
+
+import java.util.List;
+
+@Data
+public class TransformedPayloadDto {
+
+    private TransformedHeaderDto header;
+    private List<TransformedBodyDto> body;
+    private TrailerDto trailer;
+}
+
+package com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto;
+
+import lombok.Data;
+
+import java.util.List;
+
+@Data
+public class TransformedWebhookPayloadDto {
+    private TransformedWebhookHeaderDto header;
+    private List<TransformedWebhookBodyDto> body;
+}
+
+package com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto;
+
+import lombok.Data;
+
+import java.util.List;
+
+@Data
+public class FinalWebhookPayloadDto {
+    private FinalWebhookHeaderDto header;
+    private List<FinalWebhookBodyDto> data;
+}
+
+
+package com.scb.scroeconnect.solaceworker.service;
+
+import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
+import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.solaceworker.mapper.FinalPayloadMapper;
+import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
+import com.scb.scroeconnect.solaceworker.util.ParseTransformedPayloadUtil;
+import com.scb.scroeconnect.solaceworker.util.PublishToSolaceUtil;
+import com.scb.scroeconnect.solaceworker.util.RetryHandler;
+import com.scb.scroeconnect.solaceworker.util.SaveFinalPayloadUtil;
+import lombok.AllArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
+
+import java.util.Optional;
+import java.util.UUID;
+
+@Log4j2
+@Service
+@AllArgsConstructor
+public class SolaceWorkerService {
+
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
+    @Autowired
+    private final RetryHandler retryHandler;
+    private final PublishToSolaceUtil publishToSolace;
+    private final ParseTransformedPayloadUtil parseTransformedPayload;
+    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
+    private final FinalPayloadMapper finalPayloadMapper;
+    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
+
+    @Transactional
+    public void sendSolaceNotification(ConnectNotificationDelivery connectNotificationDelivery) {
+        try {
+            log.info("Processing Solace Notification for Delivery ID: {}", connectNotificationDelivery.getId());
+
+            JsonNode transformedPayload = connectNotificationDelivery.getPayload();
+
+            TransformedPayloadDto payload = parseTransformedPayload.parseTransformedPayload(transformedPayload);
+
+            FinalPayloadDto finalPayload = finalPayloadMapper.buildFinalPayload(payload, connectNotificationDelivery);
+
+            Long recipientId = connectNotificationDelivery.getRecipient().getId();
+            UUID eventId = connectNotificationDelivery.getNotificationEvent().getEventId();
+
+            Optional<ConnectSolaceConfig> getTopicDetails = connectSolaceConfigRepository.findByRecipientIdAndActive(recipientId);
+
+            if (getTopicDetails.isPresent()) {
+
+                ConnectSolaceConfig connectSolaceConfig = getTopicDetails.get();
+                String topic = connectSolaceConfig.getTopic();
+
+                if (recipientId == 1) {
+
+                    boolean solaceNotification = publishToSolace.publishToSolace(finalPayload, recipientId, eventId, topic);
+
+                    if (solaceNotification) {
+                        log.info("Solace Notification sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
+
+                        connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
+
+                        saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery, finalPayload, "Solace");
+
+                    } else {
+                        log.error("Failed to send Solace Notification delivery ID: {}, Implementing Retry Block", connectNotificationDelivery.getId());
+
+                        retryHandler.handleFailure(connectNotificationDelivery);
+                    }
+                } else if (recipientId == 2) {
+
+                    boolean webhookNotification = publishToSolace.publishToSolace(finalPayload, recipientId, eventId, topic);
+
+                    if (webhookNotification) {
+                        log.info("Webhook Notification sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
+
+                        connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
+
+                        saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery, finalPayload, "Webhook");
+
+                    } else {
+                        log.error("Failed to send Webhook Notification delivery ID: {}, Implementing Retry Block", connectNotificationDelivery.getId());
+
+                        retryHandler.handleFailure(connectNotificationDelivery);
+                    }
+
+                } else {
+                    log.error("Failed to send Notification for delivery ID: {}, Implementing Retry Block", connectNotificationDelivery.getId());
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("ALERT TO PSS:- Failed to send Solace Notification: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to send Solace Notification", e);
+        }
+    }
+
+}
