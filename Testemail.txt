@@ -197,38 +197,33 @@ public class SolaceConnectionConfig {
     }
 }
 
-Here I want to get vpn from connect_solace_config table.
+package com.scb.scroeconnect.solaceworker.service;
 
-package com.scb.scroeconnect.solaceworker.entity;
+import jakarta.jms.TextMessage;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jms.core.JmsTemplate;
+import org.springframework.stereotype.Service;
 
-import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+@Log4j2
+@Service
+@RequiredArgsConstructor
+public class SolaceProducerService {
 
-@Entity
-@Table(name = "connect_solace_config")
-@Getter
-@Setter
-@AllArgsConstructor
-@NoArgsConstructor
-public class ConnectSolaceConfig extends BaseEntity {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "solace_config_id", nullable = false)
-    private Long solaceConfigId;
+    @Autowired
+    private final JmsTemplate jmsTemplate;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "recipient_id",referencedColumnName = "id", nullable = false)
-    private Recipient recipient;
-
-    @Column(name = "topic", nullable = false)
-    private String topic;
-
-    @Column(name = "vpn", nullable = false)
-    private String vpn;
-
-    @Column(name = "active", nullable = false)
-    private String active;
+    public void sendMessage(String topic, String payload, String eventId) {
+        jmsTemplate.send(topic, session -> {
+            TextMessage message = session.createTextMessage(payload);
+            message.setJMSCorrelationID(eventId);
+            message.setJMSMessageID(eventId);
+            message.setJMSTimestamp(System.currentTimeMillis());
+            log.info("JMS Message ID {}", message.getJMSMessageID());
+            return message;
+        });
+    }
 }
+
+For Webhook also need to have another jmsTemplate to send the message as connection is different right?
