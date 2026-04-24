@@ -226,4 +226,4 @@ public class SolaceProducerService {
     }
 }
 
-For Webhook also need to have another jmsTemplate to send the message as connection is different right?
+For Webhook also need to have another jmsTemplate to send the message as connection is different right? And also in preShutDown Method?
