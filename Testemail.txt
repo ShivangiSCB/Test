@@ -1,98 +1,3 @@
-package com.scb.scroeconnect.solaceworker.converter;
-
-import jakarta.persistence.AttributeConverter;
-import jakarta.persistence.Converter;
-import lombok.AllArgsConstructor;
-import org.postgresql.util.PGobject;
-import org.springframework.beans.factory.annotation.Autowired;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
-@AllArgsConstructor
-@Converter
-public class JsonNodeConverter implements AttributeConverter<JsonNode, Object> {
-
-    @Autowired
-    private final ObjectMapper objectMapper;
-
-    @Override
-    public Object convertToDatabaseColumn(JsonNode attribute) {
-        if (attribute == null) return null;
-        try {
-            PGobject pgObject = new PGobject();
-            pgObject.setType("jsonb");               // ← tells JDBC: send as jsonb
-            pgObject.setValue(attribute.toString()); // ← serialize JsonNode to JSON string
-            return pgObject;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize JsonNode to jsonb", e);
-        }
-    }
-
-    @Override
-    public JsonNode convertToEntityAttribute(Object dbData) {
-        if (dbData == null) return null;
-        try {
-            String json = (dbData instanceof PGobject)
-                    ? ((PGobject) dbData).getValue()
-                    : dbData.toString();
-            return objectMapper.readTree(json);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to deserialize JSON from DB column", e);
-        }
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.entity;
-
-
-import com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter;
-import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
-import tools.jackson.databind.JsonNode;
-
-import java.sql.Timestamp;
-import java.time.ZonedDateTime;
-
-@Entity
-@Getter
-@Setter
-@Table(name = "connect_notification_delivery")
-public class ConnectNotificationDelivery extends BaseEntity {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "event_id",referencedColumnName = "event_id",nullable = false)
-    private NotificationEvent notificationEvent;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "recipient_id", nullable = false)
-    private Recipient recipient;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "template_id", nullable = false)
-    private NotificationTemplate notificationTemplate;
-
-    @Column(name = "delivery_mode", nullable = false)
-    private String deliveryMode;
-
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "jsonb")
-    private JsonNode payload;
-
-    @Column(nullable = false)
-    private String status;
-
-    @Column(name = "retry_count", nullable = false)
-    private int retryCount;
-
-    @Column(name = "available_at", nullable = false)
-    private ZonedDateTime availableAt;
-
-}
-
 package com.scb.scroeconnect.solaceworker.entity;
 
 import com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter;
@@ -133,128 +38,46 @@ public class ConnectSolaceWorker {
     private ZonedDateTime sendAt;
 }
 
-package com.scb.scroeconnect.solaceworker.service;
+package com.scb.scroeconnect.solaceworker.converter;
 
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalWebhookPayloadDto;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedWebhookPayloadDto;
-import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
-import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.solaceworker.mapper.FinalPayloadMapper;
-import com.scb.scroeconnect.solaceworker.mapper.FinalWebhookPayloadMapper;
-import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
-import com.scb.scroeconnect.solaceworker.util.ParseTransformedPayloadUtil;
-import com.scb.scroeconnect.solaceworker.util.PublishToSolaceUtil;
-import com.scb.scroeconnect.solaceworker.util.RetryHandler;
-import com.scb.scroeconnect.solaceworker.util.SaveFinalPayloadUtil;
-import lombok.AllArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
-import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
+import jakarta.persistence.AttributeConverter;
+import jakarta.persistence.Converter;
+import org.postgresql.util.PGobject;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
-import java.util.Optional;
-import java.util.UUID;
+@Converter(autoApply = false)
+public class JsonNodeConverter implements AttributeConverter<JsonNode, Object> {
 
-@Log4j2
-@Service
-@AllArgsConstructor
-public class SolaceWorkerService {
-
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
     @Autowired
-    private final RetryHandler retryHandler;
-    private final PublishToSolaceUtil publishToSolace;
-    private final ParseTransformedPayloadUtil parseTransformedPayload;
-    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
-    private final FinalPayloadMapper finalPayloadMapper;
-    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
-    private final FinalWebhookPayloadMapper finalWebhookPayloadMapper;
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Transactional
-    public void sendSolaceNotification(ConnectNotificationDelivery delivery) {
-
+    @Override
+    public Object convertToDatabaseColumn(JsonNode attribute) {
+        if (attribute == null) return null;
         try {
-            log.info("Processing Notification for Delivery ID: {}", delivery.getId());
-
-            JsonNode transformedPayload = delivery.getPayload();
-
-            Long recipientId = delivery.getRecipient().getId();
-            UUID eventId = delivery.getNotificationEvent().getEventId();
-
-            Optional<ConnectSolaceConfig> configOpt =
-                    connectSolaceConfigRepository.findByRecipientIdAndActive(recipientId);
-
-            if (configOpt.isEmpty()) {
-                log.error("No topic config found for recipientId: {}", recipientId);
-                retryHandler.handleFailure(delivery);
-                return;
-            }
-
-            String topic = configOpt.get().getTopic();
-
-            if (recipientId == 1) {
-                // SOLACE FLOW
-                TransformedPayloadDto payload =
-                        parseTransformedPayload.parseTransformedPayload(transformedPayload);
-
-                FinalPayloadDto finalPayload =
-                        finalPayloadMapper.buildFinalPayload(payload, delivery);
-
-                boolean published =
-                        publishToSolace.publishToSolace(finalPayload, recipientId, eventId, topic);
-
-                handleResult(delivery, published, finalPayload, "Solace");
-
-            } else if (recipientId == 2) {
-                // WEBHOOK FLOW
-                TransformedWebhookPayloadDto payload =
-                        parseTransformedPayload.parseWebhookPayload(transformedPayload);
-
-                FinalWebhookPayloadDto finalPayload =
-                        finalWebhookPayloadMapper.buildFinalPayload(payload, delivery);
-
-                boolean published =
-                        publishToSolace.publishToSolace(finalPayload, recipientId, eventId, topic);
-
-                handleResult(delivery, published, finalPayload, "Webhook");
-
-            } else {
-                log.error("Failed to send Notification for eventId: {}", eventId);
-                retryHandler.handleFailure(delivery);
-            }
-
+            PGobject pgObject = new PGobject();
+            pgObject.setType("jsonb");               // ← tells JDBC: send as jsonb
+            pgObject.setValue(attribute.toString()); // ← serialize JsonNode to JSON string
+            return pgObject;
         } catch (Exception e) {
-            log.error("ALERT TO PSS:- Failed to process notification: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to send Notification", e);
+            throw new RuntimeException("Failed to serialize JsonNode to jsonb", e);
         }
     }
 
-    private void handleResult(ConnectNotificationDelivery delivery,
-                              boolean published,
-                              Object payload,
-                              String type) {
-
-        if (published) {
-            log.info("{} Notification sent successfully for delivery ID: {}", type, delivery.getId());
-
-            connectNotificationDeliveryRepository.updateStatusById(
-                    delivery.getId(),
-                    DeliveryStatus.SENT.toString()
-            );
-
-            saveFinalPayloadUtil.saveFinalPayload(delivery, payload, type);
-
-        } else {
-            log.error("Failed to send {} Notification delivery ID: {}", type, delivery.getId());
-            retryHandler.handleFailure(delivery);
+    @Override
+    public JsonNode convertToEntityAttribute(Object dbData) {
+        if (dbData == null) return null;
+        try {
+            String json = (dbData instanceof PGobject)
+                    ? ((PGobject) dbData).getValue()
+                    : dbData.toString();
+            return objectMapper.readTree(json);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to deserialize JSON from DB column", e);
         }
     }
-
 }
 
 package com.scb.scroeconnect.solaceworker.util;
@@ -268,6 +91,7 @@ import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceWorkerRepositor
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.ZonedDateTime;
 
@@ -280,6 +104,8 @@ public class SaveFinalPayloadUtil
         @Autowired
         ConnectSolaceWorkerRepository connectSolaceWorkerRepository;
 
+        private static final ObjectMapper mapper = new ObjectMapper();
+
     public void saveFinalPayload(ConnectNotificationDelivery delivery, Object finalPayload, String deliveryMode) throws RuntimeException {
         NotificationEvent notificationEvent = connectNotificationEventRepository
                 .findByEventId(delivery.getNotificationEvent().getEventId())
@@ -289,7 +115,7 @@ public class SaveFinalPayloadUtil
         ConnectSolaceWorker connectSolaceWorker = new ConnectSolaceWorker();
         connectSolaceWorker.setDeliveryMode(deliveryMode);
         connectSolaceWorker.setNotificationEvent(notificationEvent);
-        connectSolaceWorker.setFinalPayload((JsonNode) finalPayload);
+        connectSolaceWorker.setFinalPayload(mapper.valueToTree(finalPayload));
         connectSolaceWorker.setSendAt(ZonedDateTime.now());
         connectSolaceWorker.setNotificationDelivery(delivery);
 
@@ -300,27 +126,13 @@ public class SaveFinalPayloadUtil
 }
 
 Error:
-
-Failed to initialize JPA EntityManagerFactory: Could not instantiate managed bean directly 'com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter' due to: com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter.<init>()
-[13256] [ERROR  ] 2026-04-24 13:42:35 [main] o.s.o.j.LocalContainerEntityManagerFactoryBean - Failed to initialize JPA EntityManagerFactory: Could not instantiate managed bean directly 'com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter' due to: com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter.<init>()
-Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'entityManagerFactory' defined in class path resource [com/scb/scroeconnect/solaceworker/config/DBConfig.class]: Could not instantiate managed bean directly 'com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter' due to: com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter.<init>()
-[13256] [WARN   ] 2026-04-24 13:42:35 [main] o.s.b.w.s.s.c.AnnotationConfigServletWebServerApplicationContext - Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'entityManagerFactory' defined in class path resource [com/scb/scroeconnect/solaceworker/config/DBConfig.class]: Could not instantiate managed bean directly 'com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter' due to: com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter.<init>()
-scroeHikariCP - Shutdown initiated...
-[13256] [INFO   ] 2026-04-24 13:42:35 [main] c.z.h.HikariDataSource - scroeHikariCP - Shutdown initiated...
-scroeHikariCP - Shutdown completed.
-[13256] [INFO   ] 2026-04-24 13:42:35 [main] c.z.h.HikariDataSource - scroeHikariCP - Shutdown completed.
-Stopping service [Tomcat]
-[13256] [INFO   ] 2026-04-24 13:42:35 [main] o.a.c.c.StandardService - Stopping service [Tomcat]
-
-
-Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
-[13256] [INFO   ] 2026-04-24 13:42:35 [main] o.s.b.a.l.ConditionEvaluationReportLogger - 
-
-Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
-Application run failed
-org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'entityManagerFactory' defined in class path resource [com/scb/scroeconnect/solaceworker/config/DBConfig.class]: Could not instantiate managed bean directly 'com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter' due to: com.scb.scroeconnect.solaceworker.converter.JsonNodeConverter.<init>()
-	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.initializeBean(AbstractAutowireCapableBeanFactory.java:1817) ~[spring-beans-7.0.6.jar:7.0.6]
-	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:603) ~[spring-beans-7.0.6.jar:7.0.6]
-	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:525) ~[spring-beans-7.0.6.jar:7.0.6]
-	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:333) ~[spring-beans-7.0.6.jar:7.0.6]
-	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:371) ~[spring-beans-7.0.6.jar:7.0.6]
+[20500] [WARN   ] 2026-04-24 14:00:44 [main] o.h.t.s.i.ExceptionHandlerLoggedImpl - GenerationTarget encountered exception accepting command : Error executing DDL "alter table if exists connect_solace_worker alter column final_payload set data type jsonb" via JDBC [ERROR: column "final_payload" cannot be cast automatically to type jsonb
+  Hint: You might need to specify "USING final_payload::jsonb".]
+org.hibernate.tool.schema.spi.CommandAcceptanceException: Error executing DDL "alter table if exists connect_solace_worker alter column final_payload set data type jsonb" via JDBC [ERROR: column "final_payload" cannot be cast automatically to type jsonb
+  Hint: You might need to specify "USING final_payload::jsonb".]
+  Caused by: org.postgresql.util.PSQLException: ERROR: column "final_payload" cannot be cast automatically to type jsonb
+  Hint: You might need to specify "USING final_payload::jsonb".
+	at org.postgresql.core.v3.QueryExecutorImpl.receiveErrorResponse(QueryExecutorImpl.java:2736)
+	at org.postgresql.core.v3.QueryExecutorImpl.processResults(QueryExecutorImpl.java:2421)
+	at org.postgresql.core.v3.QueryExecutorImpl.execute(QueryExecutorImpl.java:372)
+	at org.postgresql.jdbc.PgStatement.executeInternal(PgStatement.java:525)
