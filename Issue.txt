@@ -1,1503 +1,360 @@
-package com.scb.scroe.adapter.db.dao;
+package com.scb.scroeconnect.solaceworker.config;
 
-import com.scb.liquidity.database.DatabaseAccess;
-import com.scb.scroe.adapter.entity.ClientParamTbl;
+import com.solacesystems.jms.SolConnectionFactory;
+import com.solacesystems.jms.SolJmsUtility;
+import jakarta.annotation.PreDestroy;
+import jakarta.jms.DeliveryMode;
 import lombok.extern.log4j.Log4j2;
-import org.hibernate.SessionFactory;
-import org.hibernate.query.Query;
-import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.EnableTransactionManagement;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jms.connection.CachingConnectionFactory;
+import org.springframework.jms.core.JmsTemplate;
 
-import jakarta.persistence.criteria.CriteriaBuilder;
-import jakarta.persistence.criteria.CriteriaQuery;
-import jakarta.persistence.criteria.Predicate;
-import jakarta.persistence.criteria.Root;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Map;
 
-@EnableTransactionManagement
-@Repository
 @Log4j2
-public class ClientParamDAO extends DatabaseAccess {
-    private SessionFactory sf;
+@Configuration
+public class SolaceConnectionConfig {
 
-    public ClientParamDAO(SessionFactory sessionFactory) {
-        super(sessionFactory);
-        this.sf = sessionFactory;
+    private final SolaceProperties solacePropertiesConstant;
+    private final SolaceThreadProperties solaceThreadProperties;
+
+    /**
+     * Held as a field so @PreDestroy can destroy it on application shutdown,
+     * flushing cached sessions and closing the underlying Solace connection cleanly.
+     */
+    private CachingConnectionFactory cachingConnectionFactory;
+
+    public SolaceConnectionConfig(SolaceProperties solacePropertiesConstant,
+                                  SolaceThreadProperties solaceThreadProperties) {
+        this.solacePropertiesConstant = solacePropertiesConstant;
+        this.solaceThreadProperties = solaceThreadProperties;
     }
 
-    @Transactional
-    public List<ClientParamTbl> fetchValue(String key) {
-        CriteriaBuilder builder = this.sf.getCriteriaBuilder();
-        CriteriaQuery<ClientParamTbl> createQuery = builder.createQuery(ClientParamTbl.class);
-        Root<ClientParamTbl> root = createQuery.from(ClientParamTbl.class);
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(builder.equal(root.get("clientKeyId").get("key"), key));
-        createQuery.select(root).where(predicates.toArray(new Predicate[]{}));
-        Query<ClientParamTbl> query = this.sf.getCurrentSession().createQuery(createQuery);
-        return query.list();
+    @Bean
+    public SolConnectionFactory solConnectionFactory() throws Exception {
+        Map<String, String> ssl = solacePropertiesConstant.getSsl();
+        Map<String, String> queue = solacePropertiesConstant.getQueue();
+
+        SolConnectionFactory cf = SolJmsUtility.createConnectionFactory();
+
+        // --- Basic connection ---
+        cf.setVPN(queue.get("vpn"));
+        cf.setHost(queue.get("hostname")); // supports HA: "host1,host2"
+        cf.setUsername(queue.get("username"));
+        cf.setPassword(queue.get("password"));
+        cf.setClientID(queue.get("clientId"));
+
+        // --- Initial connection retries ---
+        // Retries when first establishing a connection on app startup.
+        cf.setConnectRetries(solacePropertiesConstant.getConnectRetries());
+        cf.setConnectRetriesPerHost(solacePropertiesConstant.getConnectRetriesPerHost());
+        cf.setConnectTimeoutInMillis(solacePropertiesConstant.getConnectTimeoutInMillis());
+
+        // --- Reconnect settings (transport/TCP layer) ---
+        // Handles reconnection after a LIVE connection drops (broker restart, network blip).
+        // 60 retries * 3000ms wait = up to 3 minutes of reconnect attempts before giving up.
+        // This is separate from Spring's CachingConnectionFactory.reconnectOnException —
+        // Solace handles the physical TCP wire; Spring handles stale cached session eviction.
+        cf.setReconnectRetries(solacePropertiesConstant.getReconnectRetries());
+        cf.setReconnectRetryWaitInMillis(solacePropertiesConstant.getReconnectRetryWaitInMillis());
+
+        // --- Keep-alive / heartbeat ---
+        // Detects silently dead connections (e.g. firewall silently drops idle TCP).
+        // Solace API only exposes the interval — the limit/threshold is broker-side config.
+        cf.setKeepAliveIntervalInMillis(solacePropertiesConstant.getKeepAliveIntervalInMillis());
+
+        // --- SSL / mTLS ---
+        cf.setSSLTrustStore(ssl.get("truststorePath"));
+        cf.setSSLTrustStorePassword(ssl.get("truststorePassword"));
+        cf.setSSLTrustStoreFormat(ssl.get("truststoreType"));
+        cf.setSSLKeyStore(ssl.get("keystorePath"));
+        cf.setSSLKeyStorePassword(ssl.get("keystorePassword"));
+        cf.setSSLKeyStoreFormat(ssl.get("keystoreType"));
+        cf.setAuthenticationScheme("AUTHENTICATION_SCHEME_CLIENT_CERTIFICATE");
+
+        log.info("Solace Connection Factory created successfully");
+        return cf;
     }
 
-    @Transactional
-    public String fetchValueForClientKey(String key, String clientId) {
-        CriteriaBuilder builder = this.sf.getCriteriaBuilder();
-        CriteriaQuery<ClientParamTbl> createQuery = builder.createQuery(ClientParamTbl.class);
-        Root<ClientParamTbl> root = createQuery.from(ClientParamTbl.class);
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(builder.equal(root.get("clientKeyId").get("key"), key));
-        predicates.add(builder.equal(root.get("clientKeyId").get("clientId"), clientId));
-        createQuery.select(root).where(predicates.toArray(new Predicate[]{}));
-        Query<ClientParamTbl> query = this.sf.getCurrentSession().createQuery(createQuery);
-        if (query.list().isEmpty()) {
-            log.error("=========ERROR LOG START==========");
-            log.error("Error : Value for clientId " + clientId + " and key " + key + " combination is missing in Params Table");
-            log.error("=========ERROR LOG END==========");
-            return "";
+    @Bean
+    public CachingConnectionFactory cachingConnectionFactory(SolConnectionFactory solConnectionFactory) {
+        CachingConnectionFactory cachingFactory = new CachingConnectionFactory(solConnectionFactory);
+
+        // --- Session cache ---
+        // Sessions and Producers are NOT shared across threads. CachingConnectionFactory
+        // is a borrow/return pool: each thread exclusively borrows one Session for the
+        // duration of a send(), then returns it. Two threads never share the same Session.
+        // sessionCacheSize = max concurrent sessions = should match executor thread pool size.
+        cachingFactory.setSessionCacheSize(solaceThreadProperties.getCacheSize());
+
+        // Cache MessageProducers per session — avoids recreating them on every send().
+        // Same borrow/return guarantee: one producer per session, one session per thread.
+        cachingFactory.setCacheProducers(true);
+
+        // --- Stale session eviction (Spring cache layer) ---
+        // Even after Solace reconnects the TCP wire, old Session objects in the cache
+        // are stale (created before the disconnect). Without this, threads keep borrowing
+        // broken sessions. With this, a JMSException causes the broken session to be
+        // evicted and a fresh one created on the new connection.
+        // Works in conjunction with Solace-level reconnect — they solve different layers.
+        cachingFactory.setReconnectOnException(true);
+
+        this.cachingConnectionFactory = cachingFactory;
+        return cachingFactory;
+    }
+
+    @Bean
+    public JmsTemplate jmsTemplate(CachingConnectionFactory cachingConnectionFactory) {
+        JmsTemplate jmsTemplate = new JmsTemplate(cachingConnectionFactory);
+
+        // true = publish to Topic destination; false = Queue.
+        // Even though durability lives inside broker-side queues that subscribe to topics,
+        // the producer MUST address a Topic object (not a Queue object). Without this,
+        // JmsTemplate calls session.createQueue() instead of session.createTopic(),
+        // and Solace treats it as a direct queue lookup — wrong destination type.
+        jmsTemplate.setPubSubDomain(true);
+
+        // PERSISTENT delivery mode: broker writes message to durable store BEFORE
+        // routing to subscribed queues and before acking the producer.
+        // If broker crashes mid-route, message is recovered from store.
+        // NON_PERSISTENT (default) messages are NOT spooled into subscribed queues on Solace —
+        // even if the target queues are durable, a non-persistent inbound message is dropped
+        // on broker failure before it reaches the queue.
+        jmsTemplate.setDeliveryMode(DeliveryMode.PERSISTENT);
+
+        // explicitQosEnabled=true tells JmsTemplate to explicitly pass deliveryMode,
+        // priority, and timeToLive into every producer.send(...) call.
+        // Without this, setDeliveryMode() above is SILENTLY IGNORED and Solace defaults apply.
+        // TTL is not set here (defaults to 0 = never expires) — messages live until consumed.
+        // Priority is not set here (defaults to 4 = normal) — all messages equally important.
+        jmsTemplate.setExplicitQosEnabled(true);
+
+        return jmsTemplate;
+    }
+
+    /**
+     * Graceful shutdown on application stop.
+     * Destroys CachingConnectionFactory: flushes all cached sessions and closes
+     * the underlying Solace connection cleanly, preventing message loss on shutdown.
+     */
+    @PreDestroy
+    public void shutdown() {
+        if (cachingConnectionFactory != null) {
+            log.info("Shutting down CachingConnectionFactory gracefully...");
+            cachingConnectionFactory.destroy();
+            log.info("CachingConnectionFactory shutdown complete.");
         }
-        return query.list().get(0).getValue();
     }
-
-    @Transactional
-    public List<ClientParamTbl> getClientParamList(String key, String value) {
-        log.info("Begin function getClientParamList key " + key + ",value " + value);
-        CriteriaBuilder builder = this.sf.getCriteriaBuilder();
-        CriteriaQuery<ClientParamTbl> createQuery = builder.createQuery(ClientParamTbl.class);
-        Root<ClientParamTbl> root = createQuery.from(ClientParamTbl.class);
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(builder.equal(root.get("clientKeyId").get("key"), key));
-        predicates.add(builder.equal(root.get("value"), value));
-        createQuery.select(root).where(predicates.toArray(new Predicate[]{}));
-        Query<ClientParamTbl> query = this.sf.getCurrentSession().createQuery(createQuery);
-
-        log.info("Value for key exist in DB " + query.list());
-        return query.list();
-    }
-
-    @Transactional
-    public List<ClientParamTbl> fetchAllConfigForClient(String clientId) {
-        CriteriaBuilder builder = this.sf.getCriteriaBuilder();
-        CriteriaQuery<ClientParamTbl> createQuery = builder.createQuery(ClientParamTbl.class);
-        Root<ClientParamTbl> root = createQuery.from(ClientParamTbl.class);
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(builder.equal(root.get("clientKeyId").get("clientId"), clientId));
-        createQuery.select(root).where(predicates.toArray(new Predicate[]{}));
-        Query<ClientParamTbl> query = this.sf.getCurrentSession().createQuery(createQuery);
-        return query.list();
-    }
-
 }
 
-package com.scb.scroe.adapter.db.dao;
+package com.scb.scroeconnect.solaceworker.config;
 
-import com.scb.liquidity.database.DatabaseAccess;
-import com.scb.liquidity.entities.DBQuery;
-import com.scb.liquidity.entities.FilterOperator;
-import com.scb.liquidity.entities.QueryFilter;
-import com.scb.scroe.adapter.entity.VaMaintainance;
+import com.solacesystems.jms.SolConnectionFactory;
+import com.solacesystems.jms.SolJmsUtility;
+import jakarta.annotation.PreDestroy;
+import jakarta.jms.DeliveryMode;
 import lombok.extern.log4j.Log4j2;
-import org.hibernate.SessionFactory;
-import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.EnableTransactionManagement;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jms.connection.CachingConnectionFactory;
+import org.springframework.jms.core.JmsTemplate;
 
-import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
-@EnableTransactionManagement
-@Repository
 @Log4j2
-public class VAMaintainanceDAO extends DatabaseAccess {
+@Configuration
+public class WebhookConnectionConfig {
 
-    private SessionFactory sessionFactory;
+    private final WebhookProperties webhookProperties;
+    private final WebhookThreadProperties webhookThreadProperties;
 
-    VAMaintainanceDAO(SessionFactory sessionFactory) {
-        super(sessionFactory);
-        this.sessionFactory = sessionFactory;
+    /**
+     * Held as a field so @PreDestroy can destroy it on application shutdown,
+     * flushing cached sessions and closing the underlying Solace connection cleanly.
+     */
+    private CachingConnectionFactory webhookCachingConnectionFactory;
+
+    public WebhookConnectionConfig(WebhookProperties webhookProperties,
+                                   WebhookThreadProperties webhookThreadProperties) {
+        this.webhookProperties = webhookProperties;
+        this.webhookThreadProperties = webhookThreadProperties;
     }
 
-    @Transactional
-    public VaMaintainance getVirtualAccountDetails(String virtualAccount) throws Exception {
+    @Bean
+    public SolConnectionFactory solConnectionFactory() throws Exception {
+        Map<String, String> ssl = webhookProperties.getSsl();
+        Map<String, String> queue = webhookProperties.getQueue();
 
-        log.info(" getVirtualAccountDetails begin " + virtualAccount);
-        VaMaintainance vaMaintainance = null;
+        SolConnectionFactory cf = SolJmsUtility.createConnectionFactory();
 
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class).key("virtualAccount").value(virtualAccount).operator(FilterOperator.EQ).build());
+        // --- Basic connection ---
+        cf.setVPN(queue.get("vpn"));
+        cf.setHost(queue.get("hostname")); // supports HA: "host1,host2"
+        cf.setUsername(queue.get("username"));
+        cf.setPassword(queue.get("password"));
+        cf.setClientID(queue.get("clientId"));
 
-        List<VaMaintainance> vaMaintainanceList = fetchAllWithCondition(VaMaintainance.class, dbQuery);
+        // --- Initial connection retries ---
+        // Retries when first establishing a connection on app startup.
+        cf.setConnectRetries(webhookProperties.getConnectRetries());
+        cf.setConnectRetriesPerHost(webhookProperties.getConnectRetriesPerHost());
+        cf.setConnectTimeoutInMillis(webhookProperties.getConnectTimeoutInMillis());
 
-        log.info(" vaMaintainanceList from DB " + vaMaintainanceList);
+        // --- Reconnect settings (transport/TCP layer) ---
+        // Handles reconnection after a LIVE connection drops (broker restart, network blip).
+        // 60 retries * 3000ms wait = up to 3 minutes of reconnect attempts before giving up.
+        // This is separate from Spring's CachingConnectionFactory.reconnectOnException —
+        // Solace handles the physical TCP wire; Spring handles stale cached session eviction.
+        cf.setReconnectRetries(webhookProperties.getReconnectRetries());
+        cf.setReconnectRetryWaitInMillis(webhookProperties.getReconnectRetryWaitInMillis());
 
-        if (vaMaintainanceList != null && vaMaintainanceList.size() > 0) {
-            vaMaintainance = vaMaintainanceList.get(0);
-            log.info(" vaMaintainance record from DB " + vaMaintainance);
+        // --- Keep-alive / heartbeat ---
+        // Detects silently dead connections (e.g. firewall silently drops idle TCP).
+        // Solace API only exposes the interval — the limit/threshold is broker-side config.
+        cf.setKeepAliveIntervalInMillis(webhookProperties.getKeepAliveIntervalInMillis());
+
+        // --- SSL / mTLS ---
+        cf.setSSLTrustStore(ssl.get("truststorePath"));
+        cf.setSSLTrustStorePassword(ssl.get("truststorePassword"));
+        cf.setSSLTrustStoreFormat(ssl.get("truststoreType"));
+        cf.setSSLKeyStore(ssl.get("keystorePath"));
+        cf.setSSLKeyStorePassword(ssl.get("keystorePassword"));
+        cf.setSSLKeyStoreFormat(ssl.get("keystoreType"));
+        cf.setAuthenticationScheme("AUTHENTICATION_SCHEME_CLIENT_CERTIFICATE");
+
+        log.info("Webhook Solace Connection Factory created successfully");
+        return cf;
+    }
+
+    @Bean
+    public CachingConnectionFactory webhookCachingConnectionFactory(SolConnectionFactory solConnectionFactory) {
+        CachingConnectionFactory cachingFactory = new CachingConnectionFactory(solConnectionFactory);
+
+        // --- Session cache ---
+        // Sessions and Producers are NOT shared across threads. CachingConnectionFactory
+        // is a borrow/return pool: each thread exclusively borrows one Session for the
+        // duration of a send(), then returns it. Two threads never share the same Session.
+        // sessionCacheSize = max concurrent sessions = should match executor thread pool size.
+        cachingFactory.setSessionCacheSize(webhookThreadProperties.getCacheSize());
+
+        // Cache MessageProducers per session — avoids recreating them on every send().
+        // Same borrow/return guarantee: one producer per session, one session per thread.
+        cachingFactory.setCacheProducers(true);
+
+        // --- Stale session eviction (Spring cache layer) ---
+        // Even after Solace reconnects the TCP wire, old Session objects in the cache
+        // are stale (created before the disconnect). Without this, threads keep borrowing
+        // broken sessions. With this, a JMSException causes the broken session to be
+        // evicted and a fresh one created on the new connection.
+        // Works in conjunction with Solace-level reconnect — they solve different layers.
+        cachingFactory.setReconnectOnException(true);
+
+        this.webhookCachingConnectionFactory = cachingFactory;
+        return cachingFactory;
+    }
+
+    @Bean
+    public JmsTemplate webhookJmsTemplate(CachingConnectionFactory webhookCachingConnectionFactory) {
+        JmsTemplate jmsTemplate = new JmsTemplate(webhookCachingConnectionFactory);
+
+        // true = publish to Topic destination; false = Queue.
+        // Even though durability lives inside broker-side queues that subscribe to topics,
+        // the producer MUST address a Topic object (not a Queue object). Without this,
+        // JmsTemplate calls session.createQueue() instead of session.createTopic(),
+        // and Solace treats it as a direct queue lookup — wrong destination type.
+        jmsTemplate.setPubSubDomain(true);
+
+        // PERSISTENT delivery mode: broker writes message to durable store BEFORE
+        // routing to subscribed queues and before acking the producer.
+        // If broker crashes mid-route, message is recovered from store.
+        // NON_PERSISTENT (default) messages are NOT spooled into subscribed queues on Solace —
+        // even if the target queues are durable, a non-persistent inbound message is dropped
+        // on broker failure before it reaches the queue.
+        jmsTemplate.setDeliveryMode(DeliveryMode.PERSISTENT);
+
+        // explicitQosEnabled=true tells JmsTemplate to explicitly pass deliveryMode,
+        // priority, and timeToLive into every producer.send(...) call.
+        // Without this, setDeliveryMode() above is SILENTLY IGNORED and Solace defaults apply.
+        // TTL is not set here (defaults to 0 = never expires) — messages live until consumed.
+        // Priority is not set here (defaults to 4 = normal) — all messages equally important.
+        jmsTemplate.setExplicitQosEnabled(true);
+
+        return jmsTemplate;
+    }
+
+    /**
+     * Graceful shutdown on application stop.
+     * Destroys CachingConnectionFactory: flushes all cached sessions and closes
+     * the underlying Solace connection cleanly, preventing message loss on shutdown.
+     */
+    @PreDestroy
+    public void shutdown() {
+        if (webhookCachingConnectionFactory != null) {
+            log.info("Shutting down Webhook CachingConnectionFactory gracefully...");
+            webhookCachingConnectionFactory.destroy();
+            log.info("Webhook CachingConnectionFactory shutdown complete.");
         }
-
-        return vaMaintainance;
-
-    }
-
-    @Transactional
-    public boolean updateVirtualAccountStatus(String virtualAccount, String platformRefId, String status) throws Exception {
-
-        log.info(" updateVirtualAccountStatus begin " + virtualAccount);
-
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class).key("virtualAccount").value(virtualAccount).operator(FilterOperator.EQ).build());
-
-        List<VaMaintainance> vaMaintainanceList = fetchAllWithCondition(VaMaintainance.class, dbQuery);
-        log.info("vaMaintainanceList from db - " + vaMaintainanceList);
-        if (vaMaintainanceList != null && vaMaintainanceList.size() > 0) {
-//            String vid = vaMaintainanceList.get(0).getVid();
-//            log.info("vaMaintainanceList retire from db vid" + vid);
-//            VaMaintainance vaMaintainance = fetchById(VaMaintainance.class, vid).get();
-            VaMaintainance vaMaintainance = vaMaintainanceList.get(0);
-            log.info("vaMaintainance record from DB - " + vaMaintainance);
-            evict(vaMaintainance);
-            flush();
-            log.debug("After evict updateVirtualAccountStatus for given virtualAccount:" + virtualAccount);
-            vaMaintainance.setUsedStatus(status);
-            vaMaintainance.setPlatFormRef(platformRefId);
-            merge(vaMaintainance);
-            flush();
-            log.info("updateVirtualAccountStatus va maintainance record after update from DB" + vaMaintainance);
-        } else {
-            log.info("updateVirtualAccountStatus end account does not exist in DB");
-            return false;
-        }
-        return true;
-
-    }
-
-    @Transactional
-    public Optional<VaMaintainance> getVirtualAccountInfo(String virtualAccount) throws Exception {
-
-        log.info(" getVirtualAccountInfo begin " + virtualAccount);
-
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class).key("virtualAccount").value(virtualAccount).operator(FilterOperator.EQ).build());
-
-        Optional<VaMaintainance> vaMaintainance = fetchOneWithCondition(VaMaintainance.class, dbQuery);
-
-        log.info("vaMaintainance from DB " + vaMaintainance);
-
-        return vaMaintainance;
-
-
-    }
-
-    @Transactional
-    public List<VaMaintainance> getAllVidInfo(String platFormRef) throws Exception {
-        log.info(" getVidInfo begin " + platFormRef);
-
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class).key("platform_ref").value(platFormRef).operator(FilterOperator.EQ).build());
-
-        List<VaMaintainance> vaMaintainanceList = fetchAllWithCondition(VaMaintainance.class, dbQuery);
-
-        log.info("vaMaintainanceList from DB " + vaMaintainanceList);
-
-        return vaMaintainanceList;
-
-    }
-
-}
-
-package com.scb.scroe.adapter.elements.util;
-
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.DeserializationContext;
-import com.fasterxml.jackson.databind.JsonDeserializer;
-
-import java.io.IOException;
-import java.time.ZonedDateTime;
-
-public class ZonedDateTimeDeserializer extends JsonDeserializer<ZonedDateTime> {
-    @Override
-    public ZonedDateTime deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
-        return ZonedDateTime.parse(p.getText());
-    }
-}
-package com.scb.scroe.adapter.elements;
-
-import jakarta.xml.bind.annotation.adapters.XmlAdapter;
-
-public class StringTrimAdapter extends XmlAdapter<String, String> {
-    @Override
-    public String unmarshal(String v) throws Exception {
-        if (v == null)
-            return null;
-        return v.trim().toUpperCase();
-    }
-
-    @Override
-    public String marshal(String v) throws Exception {
-        if (v == null)
-            return null;
-        return v.trim().toUpperCase();
-    }
-}
-package com.scb.scroe.adapter.util.transactionv2;
-
-public enum Category {
-    ASSIGNMENT, TRANSACTION, DIGITAL_ESCROW;
-}
-
-package com.scb.scroe.adapter.util.transactionv2;
-
-public class InitiatingParty {
-    private String partyRefId;
-
-    public String getPartyRefId() {
-        return partyRefId;
-    }
-
-    public void setPartyRefId(String partyRefId) {
-        this.partyRefId = partyRefId;
     }
 }
 
-package com.scb.scroe.adapter.util.transactionv2;
+package com.scb.scroeconnect.solaceworker.service;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.scb.scroe.xcro.model.transactionv2.Charges;
-
-import java.math.BigDecimal;
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class PaymentInfoGet {
-    private String partyRefId;
-    private String currency;
-    private String country;
-    private BigDecimal amount;
-    private String platformRefNo;
-    private Charges charges;
-    private String sourceAccountNumber;
-    private BigDecimal amountInDebitCurrency;
-
-    public String getPartyRefId() {
-        return partyRefId;
-    }
-
-    public void setPartyRefId(String partyRefId) {
-        this.partyRefId = partyRefId;
-    }
-
-    public String getCurrency() {
-        return currency;
-    }
-
-    public void setCurrency(String currency) {
-        this.currency = currency;
-    }
-
-    public String getCountry() {
-        return country;
-    }
-
-    public void setCountry(String country) {
-        this.country = country;
-    }
-
-    public BigDecimal getAmount() {
-        return amount;
-    }
-
-    public void setAmount(BigDecimal amount) {
-        this.amount = amount;
-    }
-
-    public String getPlatformRefNo() {
-        return platformRefNo;
-    }
-
-    public void setPlatformRefNo(String platformRefNo) {
-        this.platformRefNo = platformRefNo;
-    }
-
-    public Charges getCharges() {
-        return charges;
-    }
-
-    public void setCharges(Charges charges) {
-        this.charges = charges;
-    }
-
-    public String getSourceAccountNumber() {
-        return sourceAccountNumber;
-    }
-
-    public void setSourceAccountNumber(String sourceAccountNumber) {
-        this.sourceAccountNumber = sourceAccountNumber;
-    }
-
-    public BigDecimal getAmountInDebitCurrency() {
-        return amountInDebitCurrency;
-    }
-
-    public void setAmountInDebitCurrency(BigDecimal amountInDebitCurrency) {
-        this.amountInDebitCurrency = amountInDebitCurrency;
-    }
-}
-
-package com.scb.scroe.adapter.util.transactionv2;
-
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
-/**
- * T can be PaymentInfo or PaymentInfoAccount
- */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class SplitTransaction<TXNATTRIBUTES> {
-
-    private Category category;
-    private String dealRefId;
-    private InitiatingParty initiatingParty;
-    private PaymentInfoGet paymentInfo;
-    private String endToEndId;
-    private String executionId;
-    private String lastUpdatedOn;
-    private CreditTransactionInfoGet<TXNATTRIBUTES> creditTransactionInfo;
-    private String paymentId;
-
-    public String getExecutionId() {
-        return executionId;
-    }
-
-    public void setExecutionId(String executionId) {
-        this.executionId = executionId;
-    }
-
-    public Category getCategory() {
-        return category;
-    }
-
-    public void setCategory(Category category) {
-        this.category = category;
-    }
-
-    public String getDealRefId() {
-        return dealRefId;
-    }
-
-    public void setDealRefId(String dealRefId) {
-        this.dealRefId = dealRefId;
-    }
-
-    public InitiatingParty getInitiatingParty() {
-        return initiatingParty;
-    }
-
-    public void setInitiatingParty(InitiatingParty initiatingParty) {
-        this.initiatingParty = initiatingParty;
-    }
-
-    public PaymentInfoGet getPaymentInfo() {
-        return paymentInfo;
-    }
-
-    public void setPaymentInfo(PaymentInfoGet paymentInfo) {
-        this.paymentInfo = paymentInfo;
-    }
-
-    public String getEndToEndId() {
-        return endToEndId;
-    }
-
-    public void setEndToEndId(String endToEndId) {
-        this.endToEndId = endToEndId;
-    }
-
-    public String getLastUpdatedOn() {
-        return lastUpdatedOn;
-    }
-
-    public void setLastUpdatedOn(String lastUpdatedOn) {
-        this.lastUpdatedOn = lastUpdatedOn;
-    }
-
-    public CreditTransactionInfoGet<TXNATTRIBUTES> getCreditTransactionInfo() {
-        return creditTransactionInfo;
-    }
-
-    public void setCreditTransactionInfo(CreditTransactionInfoGet<TXNATTRIBUTES> creditTransactionInfo) {
-        this.creditTransactionInfo = creditTransactionInfo;
-    }
-
-    public String getPaymentId() {
-        return paymentId;
-    }
-
-    public void setPaymentId(String paymentId) {
-        this.paymentId = paymentId;
-    }
-}
-
-package com.scb.scroe.adapter.util.transactionv2;
-
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
-import java.util.List;
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class SplitTxnGetResponse<TXNATTRIBUTES> {
-    private int page;
-    private int count;
-    private int totalCount;
-    private List<SplitTransaction<TXNATTRIBUTES>> data;
-
-    public int getPage() {
-        return page;
-    }
-
-    public void setPage(int page) {
-        this.page = page;
-    }
-
-    public int getCount() {
-        return count;
-    }
-
-    public void setCount(int count) {
-        this.count = count;
-    }
-
-    public int getTotalCount() {
-        return totalCount;
-    }
-
-    public void setTotalCount(int totalCount) {
-        this.totalCount = totalCount;
-    }
-
-    public List<SplitTransaction<TXNATTRIBUTES>> getData() {
-        return data;
-    }
-
-    public void setData(List<SplitTransaction<TXNATTRIBUTES>> data) {
-        this.data = data;
-    }
-}
-
-package com.scb.scroe.adapter.util;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.scb.scroe.adapter.wrapper.ApiError;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.stereotype.Component;
-
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
-
-@Component
-@Log4j2
-public class AdapterCommonUtil {
-    public String convertApiErrorToJSONString(List<ApiError> fieldErrorMapList, Class<?> toValueType) {
-        log.info("convertApiErrorToJSONString start ApiErrorMapList" + fieldErrorMapList);
-
-        String jsonToString = "Not able to convert " + toValueType + " to json text";
-
-        String jsonArray = "[";
-        for (int i = 0; i < fieldErrorMapList.size(); i++) {
-            ObjectMapper mapper = new ObjectMapper();
-            try {
-                mapper.convertValue(fieldErrorMapList.get(i), toValueType);
-                jsonToString = mapper.writeValueAsString(mapper.convertValue(fieldErrorMapList.get(i), toValueType));
-            } catch (JsonProcessingException e) {
-                log.info("Not able to convert json object" + e.getMessage());
-                jsonToString = "Not able to convert json object check log";
-            }
-            jsonArray = jsonArray + jsonToString + ",";
-        }
-        jsonArray = jsonArray.substring(0, jsonArray.length() - 1) + "]";
-        log.info("convertObjectToJSON - " + jsonArray);
-        log.info("convertApiErrorToJSONString end ");
-
-        return jsonArray;
-    }
-
-    public LocalDateTime getCurrentDateTime() {
-
-        String dateTime = null;
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss");
-        LocalDateTime now = LocalDateTime.now();
-        //TODO: System.out.println(dtf.format(now));
-        dateTime = dtf.format(now);
-        log.info(dateTime);
-        return now;
-
-    }
-
-}
-
-package com.scb.scroe.adapter.util;
-
-import com.scb.scroe.adapter.controller.response.AdapterResponse;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-
-public class HttpStatusHandler {
-    public static ResponseEntity<String> getViaAdapterResponse(AdapterResponse adapterResponse) {
-        if (adapterResponse.getStatus().equals(AdapterConstants.FILE_TRACKING_STATUS_REJECTED))
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(adapterResponse.getResponse());
-        return ResponseEntity.status(HttpStatus.OK).body(adapterResponse.getResponse());
-    }
-    public static ResponseEntity<String> getViaResponse(String response) {
-        return ResponseEntity.status(HttpStatus.OK).body(response);
-    }
-}
-
-package com.scb.scroe.adapter.util;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.jayway.jsonpath.Configuration;
-import com.jayway.jsonpath.DocumentContext;
-import com.jayway.jsonpath.JsonPath;
-import com.jayway.jsonpath.spi.json.JacksonJsonProvider;
-
-public class JsonContext {
-
-    public static DocumentContext createContext(Object data) {
-
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
-        Configuration conf = Configuration.builder()
-                .jsonProvider(new JacksonJsonProvider())
-                .build();
-        return JsonPath.using(conf).parse(data.toString());
-    }
-
-    public static void write(DocumentContext data, String path, Object value) {
-        String[] pathArray = path.split("\\.");
-        int length = pathArray.length;
-        StringBuilder pathToUpdate = new StringBuilder();
-        for (int i = 0; i < length - 1; i++) {
-            pathToUpdate.append(pathArray[i]);
-            pathToUpdate.append(".");
-        }
-        data.put(pathToUpdate.toString().substring(0, pathToUpdate.length() - 1), pathArray[length - 1], value);
-    }
-
-    public static <T> T createObject(DocumentContext context, Class<T> tClass) throws JsonProcessingException {
-        ObjectMapper mapper = new ObjectMapper();
-        String jsonContext = context.jsonString();
-        return mapper.readValue(jsonContext, tClass);
-    }
-}
-
-package com.scb.scroe.adapter.util;
-
-import com.scb.scroe.adapter.constants.APIConstants;
-import com.scb.scroe.adapter.constants.ErrorCodes;
-import com.scb.scroe.adapter.constants.ResourceType;
-import com.scb.scroe.adapter.controller.response.AdapterResponse;
-import com.scb.scroe.adapter.mapper.Request;
-import com.scb.scroe.adapter.wrapper.ApiError;
+import jakarta.jms.TextMessage;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-
-import java.util.ArrayList;
-import java.util.List;
-
-import static com.scb.scroe.adapter.constants.ResourceType.*;
-
-@Component
-@Log4j2
-public class UnifiedFileSwitch {
-    @Autowired
-    AdapterCommonUtil commonUtil;
-
-    private UnifiedFileSwitch() {
-    }
-
-    public static ResourceType resourceType(Request request, List<String> list) {
-        try {
-            switch (list.get(1)) {
-                case "scs":
-                    switch (request.getVerb()) {
-                        case "POST":
-                            switch (list.get(2)) {
-                                case "v3":
-                                    switch (list.get(3)) {
-                                        case APIConstants.PARTY:
-                                            if (list.size() == 4)
-                                                return ONBOARD_PARTY_V3;
-                                            else if (list.size() == 5)
-                                                return AMEND_PARTY_V3;
-                                            else if ((list.size() == 6) && "delete".equalsIgnoreCase(list.get(5)))
-                                                return OFFBOARD_PARTY_V3;
-                                            return UNKNOWN_REQUEST_TYPE;
-                                        case APIConstants.PAYMENT_CONTRACT:
-                                            if (list.size() == 4)
-                                                return PAYMENT_CONTRACT_V3;
-                                            else if (list.size() == 5)
-                                                return AMEND_PAYMENT_CONTRACT_V3;
-                                            else if (list.size() == 6) {
-                                                if ("action".equalsIgnoreCase(list.get(5)))
-                                                    return MANAGE_PAYMENT_CONTRACT_V3;
-                                                else if ("close".equalsIgnoreCase(list.get(5)))
-                                                    return CLOSE_PAYMENT_CONTRACT_V3;
-                                                else if ("cancel".equalsIgnoreCase(list.get(5)))
-                                                    return CANCEL_PAYMENT_CONTRACT_V3;
-                                            } else if ((list.size() == 7) && "status".equalsIgnoreCase(list.get(5)))
-                                                return AMEND_PAYMENT_CONTRACT_STATUS;
-                                            return UNKNOWN_REQUEST_TYPE;
-                                        case APIConstants.PAYMENT:
-                                            if ("cancel".equalsIgnoreCase(list.get(5))) {
-                                                if (list.size() == 6)
-                                                    return CANCEL_PAYMENT_V3;
-                                                else if (list.size() == 7)
-                                                    return CANCEL_PAYMENT_FRAGMENT_V3;
-                                            }
-                                            return UNKNOWN_REQUEST_TYPE;
-
-                                        default:
-                                            return UNKNOWN_REQUEST_TYPE;
-                                    }
-                                default:
-                                    return UNRECOGNIZABLE_RESOURCE;
-                            }
-                        case "GET":
-                            switch (list.get(2)) {
-                                case "v3":
-                                    switch (list.get(3)) {
-                                        case APIConstants.PARTY:
-                                            if (list.size() == 4)
-                                                return GET_PARTY_V3;
-                                            else
-                                                return UNKNOWN_REQUEST_TYPE;
-                                        case APIConstants.PAYMENT_CONTRACT:
-                                            if (list.size() == 4)
-                                                return GET_PAYMENT_CONTRACT_V3;
-                                            else
-                                                return UNKNOWN_REQUEST_TYPE;
-                                        case APIConstants.PAYMENT:
-                                            if (list.size() == 4)
-                                                return GET_PAYMENT_V3;
-                                            else
-                                                return UNKNOWN_REQUEST_TYPE;
-                                        default:
-                                            return UNKNOWN_REQUEST_TYPE;
-                                    }
-                                default:
-                                    return UNRECOGNIZABLE_RESOURCE;
-                            }
-                        default:
-                            return UNKNOWN_VERB;
-                    }
-                case "scv":
-                    switch (request.getVerb()) {
-                        case "POST":
-                            switch (list.get(2)) {
-                                case "v2":
-                                    switch (list.get(3)) {
-                                        case "vault":
-                                            if (list.size() == 4)
-                                                return CREATE_VAULT;
-                                            else {
-                                                switch (list.get(4)) {
-                                                    case "amend":
-                                                        if (list.size() == 5)
-                                                            return AMEND_VAULT;
-                                                        else {
-                                                            if (list.size() == 7 && "status".equalsIgnoreCase(list.get(5)))
-                                                                return AMEND_VAULT_STATUS;
-                                                            else
-                                                                return UNKNOWN_REQUEST_TYPE;
-                                                        }
-                                                    case "delete":
-                                                        if (list.size() == 5)
-                                                            return DELETE_VAULT;
-                                                        else
-                                                            return UNKNOWN_REQUEST_TYPE;
-                                                    case "transaction":
-                                                        if (list.size() == 5)
-                                                            return CREATE_VAULT_TRANSACTION;
-                                                        else
-                                                            return UNKNOWN_REQUEST_TYPE;
-                                                    case "movement":
-                                                        if (list.size() == 5)
-                                                            return CREATE_VAULT_MOVEMENT;
-                                                        else
-                                                            return UNKNOWN_REQUEST_TYPE;
-                                                    default:
-                                                        return UNKNOWN_REQUEST_TYPE;
-                                                }
-                                            }
-                                        default:
-                                            return UNKNOWN_REQUEST_TYPE;
-                                    }
-                                default:
-                                    return UNRECOGNIZABLE_RESOURCE;
-                            }
-                        case "GET":
-                            switch (list.get(2)) {
-                                case "v2":
-                                    switch (list.get(3)) {
-                                        case "vault":
-                                            if (list.size() == 4)
-                                                return GET_VAULT;
-                                            else if (list.size() == 5) {
-                                                switch (list.get(4)) {
-                                                    case "transaction":
-                                                        return GET_VAULT_TRANSACTION;
-                                                    case "movement":
-                                                        return GET_VAULT_MOVEMENT;
-                                                    case "balances":
-                                                        return GET_VAULT_BALANCES;
-                                                    default:
-                                                        return UNKNOWN_REQUEST_TYPE;
-                                                }
-                                            } else
-                                                return UNKNOWN_REQUEST_TYPE;
-                                        case "tree":
-                                            if (list.size() == 4)
-                                                return GET_TREE;
-                                            else
-                                                return UNKNOWN_REQUEST_TYPE;
-                                        default:
-                                            return UNKNOWN_REQUEST_TYPE;
-                                    }
-                                default:
-                                    return UNRECOGNIZABLE_RESOURCE;
-                            }
-                        default:
-                            return UNKNOWN_VERB;
-                    }
-                default:
-                    return UNRECOGNIZABLE_RESOURCE;
-            }
-        } catch (Exception e) {
-            log.error(e);
-            return null;
-        }
-    }
-
-    public AdapterResponse incorrectUrlResponse(ResourceType resourceType) {
-        AdapterResponse adapterResponse = new AdapterResponse();
-        switch (resourceType) {
-            case UNKNOWN_REQUEST_TYPE:
-                log.error("==========================  ERROR LOG ============================");
-                log.error("Unknown Request type encountered");
-                ApiError apiError = new ApiError();
-                apiError.setErrorDesc(ErrorCodes.INCORRECT_REQUEST);
-                apiError.setErrorCode(ErrorCodes.INCORRECT_REQUEST_CODE);
-                List<ApiError> apiErrorList = new ArrayList<>();
-                apiErrorList.add(apiError);
-                String errorString = commonUtil.convertApiErrorToJSONString(apiErrorList, ApiError.class).replace("\\", "");
-                log.error("==========================  ERROR LOG END =========================");
-                adapterResponse.setResponse(errorString);
-                adapterResponse.setStatus(AdapterConstants.FILE_TRACKING_STATUS_REJECTED);
-                return adapterResponse;
-            case UNKNOWN_VERB:
-                log.error("==========================  ERROR LOG ============================");
-                log.error("Unknown Verb type encountered");
-                ApiError apiError1 = new ApiError();
-                apiError1.setErrorDesc(ErrorCodes.INCORRECT_VERB);
-                apiError1.setErrorCode(ErrorCodes.INCORRECT_VERB_CODE);
-                List<ApiError> apiErrorList1 = new ArrayList<>();
-                apiErrorList1.add(apiError1);
-                String errorString1 = commonUtil.convertApiErrorToJSONString(apiErrorList1, ApiError.class).replace("\\", "");
-                log.error("==========================  ERROR LOG END =========================");
-                adapterResponse.setResponse(errorString1);
-                adapterResponse.setStatus(AdapterConstants.FILE_TRACKING_STATUS_REJECTED);
-                return adapterResponse;
-            case UNKNOWN_FILE_TYPE:
-                log.error("==========================  ERROR LOG ============================");
-                log.error("Unknown File type encountered");
-                ApiError apiError2 = new ApiError();
-                apiError2.setErrorDesc(ErrorCodes.INTERNAL_ERROR);
-                apiError2.setErrorCode(ErrorCodes.INTERNAL_ERROR_CODE);
-                List<ApiError> apiErrorList2 = new ArrayList<>();
-                apiErrorList2.add(apiError2);
-                String errorString2 = commonUtil.convertApiErrorToJSONString(apiErrorList2, ApiError.class).replace("\\", "");
-                log.error("==========================  ERROR LOG END =========================");
-                adapterResponse.setResponse(errorString2);
-                adapterResponse.setStatus(AdapterConstants.FILE_TRACKING_STATUS_REJECTED);
-                return adapterResponse;
-            default:
-                log.error("==========================  ERROR LOG ============================");
-                ApiError apiError3 = new ApiError();
-                log.error("Unknown Error encountered");
-                apiError3.setErrorDesc(ErrorCodes.INTERNAL_ERROR);
-                apiError3.setErrorCode(ErrorCodes.INTERNAL_ERROR_CODE);
-                List<ApiError> apiErrorList3 = new ArrayList<>();
-                apiErrorList3.add(apiError3);
-                String errorString3 = commonUtil.convertApiErrorToJSONString(apiErrorList3, ApiError.class).replace("\\", "");
-                log.error("==========================  ERROR LOG END =========================");
-                adapterResponse.setResponse(errorString3);
-                adapterResponse.setStatus(AdapterConstants.FILE_TRACKING_STATUS_REJECTED);
-                return adapterResponse;
-        }
-    }
-}
-
-package com.scb.scroe.adapter.v3.entity.transactionV3.manageContract.enums;
-
-import com.fasterxml.jackson.annotation.JsonValue;
-
-public enum Action {
-    PAY("PAY"),
-    SWEEP("SWEEP"),
-    Vault_Transfer("Vault_Transfer");
-
-    private String status;
-
-    Action(String status) {
-        this.status = status;
-    }
-
-    @JsonValue
-    public String getType() {
-        return status;
-    }
-
-    @Override
-    public String toString() {
-        return status;
-    }
-
-}
-package com.scb.scroe.adapter.v3.entity.transactionV3.manageContract.enums;
-
-import com.fasterxml.jackson.annotation.JsonValue;
-
-public enum SubAction {
-    Apportion("Apportion"),
-    Refund("Refund");
-
-    private String status;
-
-    SubAction(String status) {
-        this.status = status;
-    }
-
-    @JsonValue
-    public String getType() {
-        return status;
-    }
-
-    @Override
-    public String toString() {
-        return status;
-    }
-
-}
-package com.scb.scroe.adapter.v3.repository;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.scb.liquidity.database.DatabaseAccess;
-import com.scb.liquidity.entities.DBQuery;
-import com.scb.liquidity.entities.FilterOperator;
-import com.scb.liquidity.entities.QueryFilter;
-import com.scb.scroe.adapter.entity.*;
-import com.scb.scroe.adapter.entity.filemgmt.RecordStatus;
-import com.scb.scroe.adapter.entity.filemgmt.RecordTrackingEntity;
-import com.scb.scroe.adapter.model.PaymentResponse;
-import com.scb.scroe.adapter.util.AdapterConstants;
-import com.scb.scroe.adapter.v3.entity.transactionV3.ContractData;
-import com.scb.scroe.adapter.v3.exceptions.ContractValidationException;
-import com.scb.scroe.adapter.v3.exceptions.ValueInDBNotSupportedException;
-import com.scb.scroe.adapter.v3.model.EndToEndIdResponse;
-import com.scb.scroe.adapter.v3.model.GetContractData;
-import com.scb.scroe.adapter.v3.model.GetContractFragment;
-import com.scb.scroe.adapter.v3.model.GetContractResponse;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
-import jakarta.persistence.TypedQuery;
-import jakarta.persistence.criteria.CriteriaBuilder;
-import jakarta.persistence.criteria.CriteriaQuery;
-import jakarta.persistence.criteria.Predicate;
-import jakarta.persistence.criteria.Root;
-import lombok.extern.log4j.Log4j2;
-import org.apache.commons.lang3.StringUtils;
-import org.hibernate.Session;
-import org.hibernate.SessionFactory;
-import org.hibernate.query.NativeQuery;
-import org.hibernate.query.Query;
-import org.springframework.stereotype.Repository;
-import org.springframework.util.MultiValueMap;
-
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
-
-import static com.scb.scroe.adapter.v3.util.Constants.PAYMENT_REQUEST_ID_DUPLICATE;
-import static com.scb.scroe.adapter.v3.util.ExceptionConstants.*;
-
-@Repository
-@Log4j2
-public class AdapterDAO extends DatabaseAccess {
-
-
-    @PersistenceContext
-    private EntityManager entityManager;
-
-    public AdapterDAO(SessionFactory sessionFactory) {
-        super(sessionFactory);
-    }
-
-    public void fetchVirtualAccount(String virtualAccount) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                .key("virtualAccount")
-                .value(virtualAccount)
-                .operator(FilterOperator.EQ)
-                .build());
-        Optional<VaMaintainance> vaMaintenance = fetchOneWithCondition(VaMaintainance.class, dbQuery);
-        if (vaMaintenance.isPresent()) {
-            if (vaMaintenance.get()
-                    .getUsedStatus()
-                    .equals("N")) {
-                log.info("Virtual Account {} usable for Contract", virtualAccount);
-            } else {
-                throw new ContractValidationException(VA_ALREADY_USED);
-            }
-        } else {
-            throw new ContractValidationException(VA_NOT_FOUND);
-        }
-    }
-
-    public void updateVirtualAccountStatus(String virtualAccount, String platformRefId) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                .key("virtualAccount")
-                .value(virtualAccount)
-                .operator(FilterOperator.EQ)
-                .build());
-        Optional<VaMaintainance> vaMaintenance = fetchOneWithCondition(VaMaintainance.class, dbQuery);
-        if (vaMaintenance.isPresent()) {
-            vaMaintenance.get()
-                    .setUsedStatus("Y");
-            vaMaintenance.get()
-                    .setPlatFormRef(platformRefId);
-            merge(vaMaintenance.get());
-        } else {
-            throw new ContractValidationException(VA_NOT_FOUND);
-        }
-    }
-
-    public Optional<VaMaintainanceV2> getVirtualAccount(String virtualAccountNumber) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                .key("vaNumber")
-                .value(virtualAccountNumber)
-                .operator(FilterOperator.EQ)
-                .build());
-        return fetchOneWithCondition(VaMaintainanceV2.class, dbQuery);
-    }
-
-    public Optional<VaMaintainanceV2> getVirtualAccountViaVA(String virtualAccountNumber) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                .key("vaNumber")
-                .value(virtualAccountNumber)
-                .operator(FilterOperator.EQ)
-                .build());
-        return fetchOneWithCondition(VaMaintainanceV2.class, dbQuery);
-    }
-
-    public Optional<VaMaintainanceV2> getVirtualAccountViaIBAN(String iban) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                .key("ibanVa")
-                .value(iban)
-                .operator(FilterOperator.EQ)
-                .build());
-        return fetchOneWithCondition(VaMaintainanceV2.class, dbQuery);
-    }
-
-    public Optional<ConnectAccountsTbl> fetchConnectAccounts(String accountNo, String country, String currency) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                        .key("accountNumber")
-                        .value(accountNo)
-                        .operator(FilterOperator.EQ)
-                        .build())
-                .addFilter(QueryFilter.builder(String.class)
-                        .key("accountCountry")
-                        .value(country)
-                        .operator(FilterOperator.EQ)
-                        .build())
-                .addFilter(QueryFilter.builder(String.class)
-                        .key("accountCurrency")
-                        .value(currency)
-                        .operator(FilterOperator.EQ)
-                        .build());
-        return fetchOneWithCondition(ConnectAccountsTbl.class, dbQuery);
-    }
-
-    public Optional<ConnectAccountsTbl> fetchAccountsWithId(String accountId) {
-        return fetchById(ConnectAccountsTbl.class, accountId);
-    }
-
-    public Optional<ClientAccountMapping> fetchClientAccountMapping(ConnectAccountsTbl connectAccountsTbl) {
-        DBQuery query = new DBQuery();
-        query.addFilter(QueryFilter.builder(ConnectAccountsTbl.class)
-                .key("account")
-                .value(connectAccountsTbl)
-                .operator(FilterOperator.EQ)
-                .build());
-        return fetchOneWithCondition(ClientAccountMapping.class, query);
-    }
-
-    public Optional<VaultClientMapping> fetchClientVaultDetailsById(String clientId) {
-        return fetchById(VaultClientMapping.class, clientId);
-    }
-
-    public Optional<VaClientSetupV2> fetchVAClientSetupById(String clientId) {
-        return fetchById(VaClientSetupV2.class, clientId);
-    }
-
-
-    public void updateVaClientSetup(String clientId) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                .key("clientSetupId")
-                .value(clientId)
-                .operator(FilterOperator.EQ)
-                .build());
-
-        Optional<VaClientSetupV2> vaClientSetup = fetchOneWithCondition(VaClientSetupV2.class, dbQuery);
-        if (vaClientSetup.isPresent()) {
-            VaClientSetupV2 setup = vaClientSetup.get();
-            setup.setDeleteFlag(Boolean.TRUE);
-            merge(setup);
-        } else {
-            throw new IllegalArgumentException("No setup found for the given clientId");
-        }
-    }
-
-    public void updateConnectAccountTbl(String accountNumber, String country, String currency) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                        .key("accountNumber")
-                        .value(accountNumber)
-                        .operator(FilterOperator.EQ)
-                        .build())
-                .addFilter(QueryFilter.builder(String.class)
-                        .key("accountCountry")
-                        .value(country)
-                        .operator(FilterOperator.EQ)
-                        .build())
-                .addFilter(QueryFilter.builder(String.class)
-                        .key("accountCurrency")
-                        .value(currency)
-                        .operator(FilterOperator.EQ)
-                        .build());
-
-        Optional<ConnectAccountsTbl> connectAccount = fetchOneWithCondition(ConnectAccountsTbl.class, dbQuery);
-        if (connectAccount.isPresent()) {
-            ConnectAccountsTbl account = connectAccount.get();
-            account.setDeleteFlag(Boolean.TRUE);
-            merge(account);
-        } else {
-            throw new IllegalArgumentException("No account found for the given parameters");
-        }
-    }
-
-
-    public void updateDeleteFlag(Object entity, boolean deleteFlag) {
-        if (entity instanceof VaClientSetupV2) {
-            VaClientSetupV2 vaClientSetup = (VaClientSetupV2) entity;
-            vaClientSetup.setDeleteFlag(deleteFlag);
-            entityManager.merge(vaClientSetup);
-        } else if (entity instanceof ConnectAccountsTbl) {
-            ConnectAccountsTbl accountsTbl = (ConnectAccountsTbl) entity;
-            accountsTbl.setDeleteFlag(deleteFlag);
-            entityManager.merge(accountsTbl);
-
-        }
-    }
-
-    public GetContractResponse getContract(String sql, MultiValueMap<String, String> params) throws JsonProcessingException {
-        NativeQuery sqlQuery = sessionFactory.getCurrentSession()
-                .createNativeQuery(sql);
-        String countQuery = "select count (end_to_end_id) from connect_contract_tbl";
-        String whereClause = StringUtils.substringBetween(sql, "where", "order by");
-        if (whereClause == null) {
-            whereClause = StringUtils.substringAfter(sql, "where");
-        }
-        if (whereClause != null && !whereClause.isEmpty()) {
-            countQuery += (" where " + whereClause);
-        }
-        NativeQuery countQ = sessionFactory.getCurrentSession()
-                .createNativeQuery(countQuery);
-        Long totalCount = (Long) (countQ.uniqueResult());
-        sqlQuery.addEntity(ContractEntity.class);
-        int page = 1, count = 10;
-        if (params.containsKey("count"))
-            count = Integer.parseInt(params.get("count")
-                    .get(0));
-        if (params.containsKey("page"))
-            page = Integer.parseInt(params.get("page")
-                    .get(0));
-        sqlQuery.setFirstResult((page - 1) * count);
-        sqlQuery.setMaxResults(count);
-        List<ContractEntity> contracts = sqlQuery.list();
-        ObjectMapper om = new ObjectMapper();
-        om.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-        List<GetContractData> contractDataList = new ArrayList<>();
-        for (ContractEntity c : contracts) {
-            ContractData contractData = om.readValue(c.getContract(), ContractData.class);
-            List<EndToEndIdResponse> endToEndIdResponses = new ArrayList<>();
-            try {
-                List<PaymentResponse> paymentResponse = om.readValue(c.getResponse(), new TypeReference<List<PaymentResponse>>() {
-                });
-                endToEndIdResponses = paymentResponse.stream()
-                        .map(
-                                response -> new EndToEndIdResponse(response.getStatus(), response.getEndToEndId(), response.getPlatformRefNo(), response.getFragment()
-                                        .stream()
-                                        .map(fragment -> new GetContractFragment(fragment.getFragmentPlatformRefNo(), fragment.getStatus(), fragment.getScheduledOn()))
-                                        .collect(Collectors.toList())))
-                        .collect(Collectors.toList());
-            } catch (Exception ignore) {
-                log.info("Exception ignored as this contract body although correct, is non-parsable according to current contract payload");
-            }
-            GetContractData getContractData = new GetContractData(c.getStatus(), contractData, endToEndIdResponses);
-            contractDataList.add(getContractData);
-        }
-        return new GetContractResponse(page, count, totalCount, contractDataList);
-    }
-
-    public Optional<ContractEntity> fetchContractByPlatformRefIdAndClientId(String platformRefId, String clientId) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                .key("platformRefId")
-                .value(platformRefId)
-                .operator(FilterOperator.EQ)
-                .build());
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                .key("clientId")
-                .value(clientId)
-                .operator(FilterOperator.EQ)
-                .build());
-        return fetchOneWithCondition(ContractEntity.class, dbQuery);
-    }
-
-    public void saveActionEntity(String scsClientId, String platFormRefId, String paymentRequestId) {
-        ActionTbl actionTbl = new ActionTbl();
-        com.scb.scroe.adapter.entity.id.PaymentUniqueReference paymentUniqueReference = new com.scb.scroe.adapter.entity.id.PaymentUniqueReference();
-        paymentUniqueReference.setClientId(scsClientId);
-        paymentUniqueReference.setPlatformRefId(platFormRefId);
-        paymentUniqueReference.setPaymentRequestId(paymentRequestId);
-        actionTbl.setPaymentUniqueReference(paymentUniqueReference);
-        actionTbl.setDeleteFlag("No");
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(Object.class)
-                .key("paymentUniqueReference")
-                .value(paymentUniqueReference)
-                .operator(FilterOperator.EQ)
-                .build());
-        if (fetchOneWithCondition(ActionTbl.class, dbQuery).isPresent())
-            throw new ContractValidationException(PAYMENT_REQUEST_ID_DUPLICATE);
-        persist(actionTbl);
-    }
-
-    public void saveContractEntity(String clientId, String platformRefId, String contractData, String endToEndId, String status) {
-        contractData = String.valueOf(contractData);
-        String sql = "INSERT INTO connect_contract_tbl( client_id, created_date, updated_date, end_to_end_id, delete_flag, platform_ref_id, status, contract) " +
-                "VALUES (:clientId, :createdDate, :updatedDate, :endToEndId, :deleteFlag, :platformRefId, :status, :contractData\\:\\:JSON)";
-        NativeQuery sqlQuery = sessionFactory.getCurrentSession()
-                .createNativeQuery(sql);
-        sqlQuery.setParameter("clientId", clientId)
-                .setParameter("createdDate", LocalDateTime.now())
-                .setParameter("updatedDate", LocalDateTime.now())
-                .setParameter("endToEndId", endToEndId)
-                .setParameter("deleteFlag", "N")
-                .setParameter("platformRefId", platformRefId)
-                .setParameter("contractData", contractData)
-                .setParameter("status", (status == null) ? AdapterConstants.TRANSACTION_STATUS_OPEN : status);
-        sqlQuery.addEntity(ContractEntity.class);
-        sqlQuery.executeUpdate();
-    }
-
-    public void saveContractEntityWithResponse(String clientId, String platformRefId, String contractData, String endToEndId, String status, String response) {
-        // done to convert null to null literal, as ::json parsing fails if it is former.
-        contractData = String.valueOf(contractData);
-        response = String.valueOf(response);
-        String sql = "INSERT INTO connect_contract_tbl( client_id, created_date, updated_date, end_to_end_id, delete_flag, platform_ref_id, status, contract, response) " +
-                "VALUES (:clientId, :createdDate, :updatedDate, :endToEndId, :deleteFlag, :platformRefId, :status,:contract\\:\\:JSON,:response\\:\\:JSON)";
-        NativeQuery sqlQuery = sessionFactory.getCurrentSession()
-                .createNativeQuery(sql);
-        sqlQuery.setParameter("clientId", clientId)
-                .setParameter("createdDate", LocalDateTime.now())
-                .setParameter("updatedDate", LocalDateTime.now())
-                .setParameter("endToEndId", endToEndId)
-                .setParameter("deleteFlag", "N")
-                .setParameter("platformRefId", platformRefId)
-                .setParameter("contract", contractData)
-                .setParameter("response", response)
-                .setParameter("status", (status == null) ? AdapterConstants.TRANSACTION_STATUS_OPEN : status);
-        sqlQuery.addEntity(ContractEntity.class);
-        sqlQuery.executeUpdate();
-    }
-
-    public void updateContractEntityWithData(String clientId, String contractDataInJson, ContractEntity contractEntity) {
-        contractDataInJson = String.valueOf(contractDataInJson);
-        String sql = "UPDATE connect_contract_tbl SET contract = ?\\:\\:JSON WHERE end_to_end_id = ?";
-        NativeQuery sqlQuery = sessionFactory.getCurrentSession()
-                .createNativeQuery(sql);
-        sqlQuery.setParameter(2, contractEntity.getEndToEndId());
-        sqlQuery.setParameter(1, contractDataInJson);
-        sqlQuery.addEntity(ContractEntity.class);
-        sqlQuery.executeUpdate();
-    }
-
-    public void updateContractEntityWithStatus(ContractEntity contractEntity, String status) {
-        String sql = "UPDATE connect_contract_tbl SET status = :status WHERE end_to_end_id = :endToEndId";
-        NativeQuery sqlQuery = sessionFactory.getCurrentSession()
-                .createNativeQuery(sql);
-        sqlQuery.setParameter("endToEndId", contractEntity.getEndToEndId());
-        sqlQuery.setParameter("status", status);
-        sqlQuery.addEntity(ContractEntity.class);
-        sqlQuery.executeUpdate();
-    }
-
-    public void updateContractEntityWithResponse(String response, ContractEntity contractEntity) {
-        response = String.valueOf(response);
-        String sql = "UPDATE connect_contract_tbl SET response = ?\\:\\:JSON WHERE end_to_end_id = ?";
-        NativeQuery sqlQuery = sessionFactory.getCurrentSession()
-                .createNativeQuery(sql);
-        sqlQuery.setParameter(2, contractEntity.getEndToEndId());
-        sqlQuery.setParameter(1, response);
-        sqlQuery.addEntity(ContractEntity.class);
-        sqlQuery.executeUpdate();
-    }
-
-    public String fetchKeyConfig(String key, String clientId) {
-        CriteriaBuilder builder = sessionFactory.getCriteriaBuilder();
-        CriteriaQuery<ClientParamTbl> createQuery = builder.createQuery(ClientParamTbl.class);
-        Root<ClientParamTbl> root = createQuery.from(ClientParamTbl.class);
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(builder.equal(root.get("clientKeyId")
-                .get("key"), key));
-        predicates.add(builder.equal(root.get("clientKeyId")
-                .get("clientId"), clientId));
-        createQuery.select(root)
-                .where(predicates.toArray(new Predicate[]{}));
-        Query<ClientParamTbl> query = sessionFactory.getCurrentSession()
-                .createQuery(createQuery);
-        if (query.list()
-                .isEmpty()) {
-            log.error("=========ERROR LOG START==========");
-            log.error("Error : Value for clientId " + clientId + " and key " + key + " combination is missing in Params Table");
-            log.error("=========ERROR LOG END==========");
-            return "";
-        }
-        return query.list()
-                .get(0)
-                .getValue();
-    }
-
-    public List<PartyVaultMapping> fetchVaultWithPartyId(String partyId) {
-        CriteriaBuilder builder = this.sessionFactory.getCriteriaBuilder();
-        CriteriaQuery<PartyVaultMapping> createQuery = builder.createQuery(PartyVaultMapping.class);
-        Root<PartyVaultMapping> root = createQuery.from(PartyVaultMapping.class);
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(builder.equal(root.get("partyVaultId")
-                .get("partyId"), partyId));
-        createQuery.select(root)
-                .where(predicates.toArray(new Predicate[]{}));
-        Query<PartyVaultMapping> query = this.sessionFactory.getCurrentSession()
-                .createQuery(createQuery);
-        return query.list();
-    }
-
-    public Optional<PartyVaultMapping> fetchVaultWithVaultId(String vaultId) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(Object.class)
-                .key("vaultId")
-                .value(vaultId)
-                .operator(FilterOperator.EQ)
-                .build());
-        return fetchOneWithCondition(PartyVaultMapping.class, dbQuery);
-    }
-
-    public List<RecordTrackingEntity> fetchTxnRecord(String platformRef) {
-        Session session = sessionFactory.getCurrentSession();
-        CriteriaBuilder cb = session.getCriteriaBuilder();
-        CriteriaQuery<RecordTrackingEntity> cq = cb.createQuery(RecordTrackingEntity.class);
-        Root<RecordTrackingEntity> from = cq.from(RecordTrackingEntity.class);
-        cq.select(from)
-                .where(cb.and(
-                        cb.equal(from.get("platformRef"), platformRef),
-                        cb.isNull(from.get("xcroResponse"))));
-
-        TypedQuery<RecordTrackingEntity> query = session.createQuery(cq);
-        return query.getResultStream()
-                .collect(Collectors.toList());
-    }
-
-    public Long getNoOfRecordsUnProcessed(String id) {
-        Session session = sessionFactory.getCurrentSession();
-        CriteriaBuilder cb = session.getCriteriaBuilder();
-        CriteriaQuery<Long> cq = cb.createQuery(Long.class);
-        Root<RecordTrackingEntity> from = cq.from(RecordTrackingEntity.class);
-        CriteriaBuilder.In<RecordStatus> inClause = cb.in(from.get("status"));
-        inClause.value(RecordStatus.ADAPTER_RESPONSE_FILLED_REJECTION);
-        inClause.value(RecordStatus.XCRO_RESPONSE_FILLED_REJECTION);
-        inClause.value(RecordStatus.XCRO_RESPONSE_FILLED_SUCCESS);
-        cq.select(cb.count(from));
-        cq.where(cb.and(cb.equal(from.get("fileProcessStatus")
-                .get("id"), id), cb.not(inClause)));
-        TypedQuery<Long> query = session.createQuery(cq);
-        return (Long) query.getSingleResult();
-    }
-
-    public Optional<VaMaintainanceV2> getVirtualAccountWithRef(String partyRefId) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(String.class)
-                .key("refNbr")
-                .value(partyRefId)
-                .operator(FilterOperator.EQ)
-                .build());
-        return fetchOneWithCondition(VaMaintainanceV2.class, dbQuery);
-    }
-
-    public List<ClientParamTbl> fetchParamConfig(String clientId) {
-        CriteriaBuilder builder = sessionFactory.getCriteriaBuilder();
-        CriteriaQuery<ClientParamTbl> createQuery = builder.createQuery(ClientParamTbl.class);
-        Root<ClientParamTbl> root = createQuery.from(ClientParamTbl.class);
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(builder.equal(root.get("clientKeyId")
-                .get("clientId"), clientId));
-        createQuery.select(root)
-                .where(predicates.toArray(new Predicate[]{}));
-        Query<ClientParamTbl> query = sessionFactory.getCurrentSession()
-                .createQuery(createQuery);
-        if (query.list()
-                .isEmpty()) {
-            log.error("=========ERROR LOG START==========");
-            log.error("Error : Value for clientId " + clientId + " is missing in Params Table");
-            log.error("=========ERROR LOG END==========");
-            return new ArrayList<>();
-        }
-        return query.list();
-    }
-
-    public String fetchClientSetupId(String scroeClientId, String physicalAccount, String country, String currency) {
-        CriteriaBuilder builder = sessionFactory.getCriteriaBuilder();
-        CriteriaQuery<VaClientSetupV2> createQuery = builder.createQuery(VaClientSetupV2.class);
-        Root<VaClientSetupV2> root = createQuery.from(VaClientSetupV2.class);
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(builder.equal(root.get("scroeClientId"), scroeClientId));
-        predicates.add(builder.equal(root.get("physicalAccount"), physicalAccount));
-        predicates.add(builder.equal(root.get("country"), country));
-        predicates.add(builder.equal(root.get("currency"), currency));
-        createQuery.select(root)
-                .where(predicates.toArray(new Predicate[]{}));
-        Query<VaClientSetupV2> query = sessionFactory.getCurrentSession()
-                .createQuery(createQuery);
-        List<VaClientSetupV2> clientSetupList = query.list();
-        if (clientSetupList.size() > 1) {
-            log.error("incorrect setup for scroeClientId -> {}, it has {} rows", scroeClientId, clientSetupList.size());
-            throw new ValueInDBNotSupportedException(CLIENT_ID_SETUP_INCORRECT);
-        }
-        if (clientSetupList.isEmpty()) {
-            log.warn("assuming non-va use case for scroeClientId -> {}, it has {} rows", scroeClientId, 0);
-            return scroeClientId;
-        }
-        return clientSetupList.get(0)
-                .getClientSetupId();
-    }
-
-    public VaClientSetupV2 fetchClientSetupIdByVaPartA(String vaPartA) {
-        CriteriaBuilder builder = sessionFactory.getCriteriaBuilder();
-        CriteriaQuery<VaClientSetupV2> createQuery = builder.createQuery(VaClientSetupV2.class);
-        Root<VaClientSetupV2> root = createQuery.from(VaClientSetupV2.class);
-        List<Predicate> predicates = new ArrayList<>();
-        predicates.add(builder.equal(root.get("vaPartA"), vaPartA));
-        createQuery.select(root)
-                .where(predicates.toArray(new Predicate[]{}));
-        Query<VaClientSetupV2> query = sessionFactory.getCurrentSession()
-                .createQuery(createQuery);
-        List<VaClientSetupV2> clientSetupList = query.list();
-        if (clientSetupList.size() != 1) {
-            log.error("incorrect setup for scroeClientId -> {}, it has {} rows", vaPartA, clientSetupList.size());
-            throw new ValueInDBNotSupportedException(CLIENT_ID_SETUP_INCORRECT);
-        }
-        return clientSetupList.get(0);
-    }
-
-    public String fetchEventCategory(String eventType) {
-        DBQuery dbQuery = new DBQuery();
-        dbQuery.addFilter(QueryFilter.builder(Object.class)
-                .key("eventType")
-                .value(eventType)
-                .operator(FilterOperator.EQ)
-                .build());
-        Optional<ConnectEventTypes> connectEventTypes = fetchOneWithCondition(ConnectEventTypes.class, dbQuery);
-        if (connectEventTypes.isPresent())
-            return connectEventTypes.get()
-                    .getEventCategory();
-        return eventType;
-    }
-}
-package com.scb.scroe.adapter.v3.xcrowebhook;
-
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.jayway.jsonpath.DocumentContext;
-import com.scb.scroe.adapter.entity.PartyVaultMapping;
-import com.scb.scroe.adapter.entity.VaultClientMapping;
-import com.scb.scroe.adapter.util.JsonContext;
-import com.scb.scroe.adapter.v3.exceptions.VaultClientNotFoundException;
-import com.scb.scroe.adapter.v3.repository.AdapterDAO;
-import com.scb.scroe.xcro.model.vaultapi.RefRequest;
-import com.scb.scroe.xcro.vaultapi.VaultMgmtApi;
-import com.scb.scroe.xcro.wrapper.VaultWrapperObject;
-import lombok.extern.log4j.Log4j2;
+import org.springframework.jms.core.JmsTemplate;
 import org.springframework.stereotype.Service;
-
-import java.util.List;
-import java.util.Optional;
 
 @Log4j2
 @Service
-public class XcroWebhookService {
-    private final AdapterDAO adapterDAO;
-    private final VaultMgmtApi vaultMgmtApi;
+@RequiredArgsConstructor
+public class SolaceProducerService {
 
-    private final ObjectMapper mapper;
+    @Autowired
+    private final JmsTemplate jmsTemplate;
 
-    public XcroWebhookService(AdapterDAO adapterDAO, VaultMgmtApi vaultMgmtApi) {
-        this.adapterDAO = adapterDAO;
-        this.vaultMgmtApi = vaultMgmtApi;
-        mapper = new ObjectMapper();
-        mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-    }
-
-    public Object vaultStatusChange(String webhookString, String clientId) {
-        DocumentContext documentContext = JsonContext.createContext(webhookString);
-        String status = documentContext.read("status");
-        String partyId = documentContext.read("partyId");
-        List<PartyVaultMapping> partyVaultMappingList = this.adapterDAO.fetchVaultWithPartyId(partyId);
-        for(PartyVaultMapping partyVaultMapping : partyVaultMappingList){
-            RefRequest request = new RefRequest();
-            request.setClientId(fetchVaultClientId(clientId));
-            request.setVaultId(partyVaultMapping.getVaultId());
-            request.setRefNo(status);
-            VaultWrapperObject vaultWrapperObject = vaultMgmtApi.amendVaultStatus(request);
-        }
-        return null;
-    }
-
-    private String fetchVaultClientId(String clientId) {
-        Optional<VaultClientMapping> vaultClientMapping = adapterDAO.fetchClientVaultDetailsById(clientId);
-        if (!vaultClientMapping.isPresent()) {
-            throw new VaultClientNotFoundException("Vault Client Id not found");
-        }
-        return vaultClientMapping.get()
-                .getVaultClientId();
+    public void sendMessage(String topic, String payload, String eventId) {
+        jmsTemplate.send(topic, session -> {
+            TextMessage message = session.createTextMessage(payload);
+            message.setJMSCorrelationID(eventId);
+            message.setJMSMessageID(eventId);
+            message.setJMSTimestamp(System.currentTimeMillis());
+            log.info("JMS Message ID {}", message.getJMSMessageID());
+            return message;
+        });
     }
 }
+
+package com.scb.scroeconnect.solaceworker.service;
+
+import jakarta.jms.TextMessage;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jms.core.JmsTemplate;
+import org.springframework.stereotype.Service;
+
+@Log4j2
+@Service
+@RequiredArgsConstructor
+public class WebhookProducerService {
+
+    @Autowired
+    private final JmsTemplate webhookjmsTemplate;
+
+    public void sendWebhookMessage(String topic, String payload, String eventId) {
+        webhookjmsTemplate.send(topic, session -> {
+            TextMessage message = session.createTextMessage(payload);
+            message.setJMSCorrelationID(eventId);
+            message.setJMSMessageID(eventId);
+            message.setJMSTimestamp(System.currentTimeMillis());
+            log.info("JMS Message ID {}", message.getJMSMessageID());
+            return message;
+        });
+    }
+    
+}
+
+I have 2 different connections what all changes do I need to do to make both different?
