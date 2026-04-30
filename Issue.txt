@@ -1,485 +1,44 @@
-package com.scb.scroeconnect.solaceworker.config;
+package com.scb.scroeconnect.solaceworker.util;
 
-import com.solacesystems.jms.SolConnectionFactory;
-import com.solacesystems.jms.SolJmsUtility;
-import jakarta.annotation.PreDestroy;
-import jakarta.jms.DeliveryMode;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.jms.connection.CachingConnectionFactory;
-import org.springframework.jms.core.JmsTemplate;
-
-import java.util.Map;
-
-@Log4j2
-@Configuration
-public class SolaceConnectionConfig {
-    private final SolaceProperties properties;
-    private final SolaceThreadProperties threadProperties;
-
-    /**
-     * Held as a field so @PreDestroy can destroy it on application shutdown,
-     * flushing cached sessions and closing the underlying Solace connection cleanly.
-     */
-    private CachingConnectionFactory cachingConnectionFactory;
-
-    public SolaceConnectionConfig(SolaceProperties properties,
-                                  SolaceThreadProperties threadProperties) {
-        this.properties = properties;
-        this.threadProperties = threadProperties;
-    }
-
-    @Bean(name = "solaceConnectionFactory")
-    public SolConnectionFactory solaceConnectionFactory() throws Exception {
-        Map<String, String> ssl = properties.getSsl();
-        Map<String, String> queue = properties.getQueue();
-
-        SolConnectionFactory cf = SolJmsUtility.createConnectionFactory();
-
-        // --- Basic connection ---
-        cf.setVPN(queue.get("vpn"));
-        cf.setHost(queue.get("hostname")); // supports HA: "host1,host2"
-        cf.setUsername(queue.get("username"));
-        cf.setPassword(queue.get("password"));
-        cf.setClientID(queue.get("clientId"));
-
-        // --- Initial connection retries ---
-        // Retries when first establishing a connection on app startup.
-        cf.setConnectRetries(properties.getConnectRetries());
-        cf.setConnectRetriesPerHost(properties.getConnectRetriesPerHost());
-        cf.setConnectTimeoutInMillis(properties.getConnectTimeoutInMillis());
-
-        // --- Reconnect settings (transport/TCP layer) ---
-        // Handles reconnection after a LIVE connection drops (broker restart, network blip).
-        // 60 retries * 3000ms wait = up to 3 minutes of reconnect attempts before giving up.
-        // This is separate from Spring's CachingConnectionFactory.reconnectOnException —
-        // Solace handles the physical TCP wire; Spring handles stale cached session eviction.
-        cf.setReconnectRetries(properties.getReconnectRetries());
-        cf.setReconnectRetryWaitInMillis(properties.getReconnectRetryWaitInMillis());
-
-        // --- Keep-alive / heartbeat ---
-        // Detects silently dead connections (e.g. firewall silently drops idle TCP).
-        // Solace API only exposes the interval — the limit/threshold is broker-side config.
-        cf.setKeepAliveIntervalInMillis(properties.getKeepAliveIntervalInMillis());
-
-        // --- SSL / mTLS ---
-        cf.setSSLTrustStore(ssl.get("truststorePath"));
-        cf.setSSLTrustStorePassword(ssl.get("truststorePassword"));
-        cf.setSSLTrustStoreFormat(ssl.get("truststoreType"));
-        cf.setSSLKeyStore(ssl.get("keystorePath"));
-        cf.setSSLKeyStorePassword(ssl.get("keystorePassword"));
-        cf.setSSLKeyStoreFormat(ssl.get("keystoreType"));
-        cf.setAuthenticationScheme("AUTHENTICATION_SCHEME_CLIENT_CERTIFICATE");
-
-        log.info("Solace Connection Factory created");
-        return cf;
-    }
-
-    @Bean(name = "solaceCachingConnectionFactory")
-    public CachingConnectionFactory cachingConnectionFactory(
-            @Qualifier("solaceConnectionFactory") SolConnectionFactory cf) {
-        CachingConnectionFactory factory = new CachingConnectionFactory(cf);
-
-        // --- Session cache ---
-        // Sessions and Producers are NOT shared across threads. CachingConnectionFactory
-        // is a borrow/return pool: each thread exclusively borrows one Session for the
-        // duration of a send(), then returns it. Two threads never share the same Session.
-        // sessionCacheSize = max concurrent sessions = should match executor thread pool size.
-        factory.setSessionCacheSize(threadProperties.getCacheSize());
-
-        // Cache MessageProducers per session — avoids recreating them on every send().
-        // Same borrow/return guarantee: one producer per session, one session per thread.
-        factory.setCacheProducers(true);
-
-        // --- Stale session eviction (Spring cache layer) ---
-        // Even after Solace reconnects the TCP wire, old Session objects in the cache
-        // are stale (created before the disconnect). Without this, threads keep borrowing
-        // broken sessions. With this, a JMSException causes the broken session to be
-        // evicted and a fresh one created on the new connection.
-        // Works in conjunction with Solace-level reconnect — they solve different layers.
-        factory.setReconnectOnException(true);
-
-        this.cachingConnectionFactory = factory;
-        return factory;
-    }
-
-    @Bean(name = "solaceJmsTemplate")
-    public JmsTemplate jmsTemplate(
-            @Qualifier("solaceCachingConnectionFactory") CachingConnectionFactory cf) {
-        JmsTemplate template = new JmsTemplate(cf);
-
-        // true = publish to Topic destination; false = Queue.
-        // Even though durability lives inside broker-side queues that subscribe to topics,
-        // the producer MUST address a Topic object (not a Queue object). Without this,
-        // JmsTemplate calls session.createQueue() instead of session.createTopic(),
-        // and Solace treats it as a direct queue lookup — wrong destination type.
-        template.setPubSubDomain(true);
-
-        // PERSISTENT delivery mode: broker writes message to durable store BEFORE
-        // routing to subscribed queues and before acking the producer.
-        // If broker crashes mid-route, message is recovered from store.
-        // NON_PERSISTENT (default) messages are NOT spooled into subscribed queues on Solace —
-        // even if the target queues are durable, a non-persistent inbound message is dropped
-        // on broker failure before it reaches the queue.
-        template.setDeliveryMode(DeliveryMode.PERSISTENT);
-
-        // explicitQosEnabled=true tells JmsTemplate to explicitly pass deliveryMode,
-        // priority, and timeToLive into every producer.send(...) call.
-        // Without this, setDeliveryMode() above is SILENTLY IGNORED and Solace defaults apply.
-        // TTL is not set here (defaults to 0 = never expires) — messages live until consumed.
-        // Priority is not set here (defaults to 4 = normal) — all messages equally important.
-        template.setExplicitQosEnabled(true);
-
-        return template;
-    }
-
-    /**
-     * Graceful shutdown on application stop.
-     * Destroys CachingConnectionFactory: flushes all cached sessions and closes
-     * the underlying Solace connection cleanly, preventing message loss on shutdown.
-     */
-    @PreDestroy
-    public void shutdown() {
-        if (cachingConnectionFactory != null) {
-            log.info("Shutting down Solace CachingConnectionFactory...");
-            cachingConnectionFactory.destroy();
-        }
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.config;
-
-import com.solacesystems.jms.SolConnectionFactory;
-import com.solacesystems.jms.SolJmsUtility;
-import jakarta.annotation.PreDestroy;
-import jakarta.jms.DeliveryMode;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.jms.connection.CachingConnectionFactory;
-import org.springframework.jms.core.JmsTemplate;
-
-import java.util.Map;
-
-@Log4j2
-@Configuration
-public class WebhookConnectionConfig {
-
-    private final WebhookProperties properties;
-
-    @Value("${webhook.thread.cacheSize}")
-    private int cacheSize;
-
-    private CachingConnectionFactory cachingConnectionFactory;
-
-    public WebhookConnectionConfig(WebhookProperties properties) {
-        this.properties = properties;
-    }
-
-    @Bean(name = "webhookConnectionFactory")
-    public SolConnectionFactory webhookConnectionFactory() throws Exception {
-        Map<String, String> ssl = properties.getSsl();
-        Map<String, String> queue = properties.getQueue();
-
-        SolConnectionFactory cf = SolJmsUtility.createConnectionFactory();
-
-        cf.setVPN(queue.get("vpn"));
-        cf.setHost(queue.get("hostname"));
-        cf.setUsername(queue.get("username"));
-        cf.setPassword(queue.get("password"));
-        cf.setClientID(queue.get("clientId"));
-
-        cf.setConnectRetries(properties.getConnectRetries());
-        cf.setConnectRetriesPerHost(properties.getConnectRetriesPerHost());
-        cf.setConnectTimeoutInMillis(properties.getConnectTimeoutInMillis());
-
-        cf.setReconnectRetries(properties.getReconnectRetries());
-        cf.setReconnectRetryWaitInMillis(properties.getReconnectRetryWaitInMillis());
-
-        cf.setKeepAliveIntervalInMillis(properties.getKeepAliveIntervalInMillis());
-
-        cf.setSSLTrustStore(ssl.get("truststorePath"));
-        cf.setSSLTrustStorePassword(ssl.get("truststorePassword"));
-        cf.setSSLTrustStoreFormat(ssl.get("truststoreType"));
-        cf.setSSLKeyStore(ssl.get("keystorePath"));
-        cf.setSSLKeyStorePassword(ssl.get("keystorePassword"));
-        cf.setSSLKeyStoreFormat(ssl.get("keystoreType"));
-        cf.setAuthenticationScheme("AUTHENTICATION_SCHEME_CLIENT_CERTIFICATE");
-
-        log.info("Webhook Solace Connection Factory created");
-        return cf;
-    }
-
-    @Bean(name = "webhookCachingConnectionFactory")
-    public CachingConnectionFactory cachingConnectionFactory(@Qualifier("webhookConnectionFactory") SolConnectionFactory cf) {
-        CachingConnectionFactory factory = new CachingConnectionFactory(cf);
-
-        factory.setSessionCacheSize(cacheSize);
-        factory.setCacheProducers(true);
-        factory.setReconnectOnException(true);
-
-        this.cachingConnectionFactory = factory;
-        return factory;
-    }
-
-    @Bean(name = "webhookJmsTemplate")
-    public JmsTemplate webhookJmsTemplate(@Qualifier("webhookCachingConnectionFactory") CachingConnectionFactory cf) {
-        JmsTemplate template = new JmsTemplate(cf);
-        template.setPubSubDomain(true);
-        template.setDeliveryMode(DeliveryMode.PERSISTENT);
-        template.setExplicitQosEnabled(true);
-
-        return template;
-    }
-
-    @PreDestroy
-    public void shutdown() {
-        if (cachingConnectionFactory != null) {
-            log.info("Shutting down Webhook CachingConnectionFactory...");
-            cachingConnectionFactory.destroy();
-        }
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.config;
-
-import lombok.Getter;
-import lombok.Setter;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
-
-import java.util.Map;
-
-@Getter
-@Setter
-@Configuration
-@ConfigurationProperties(prefix = "solace.webhook")
-public class WebhookProperties {
-    private Map<String, String> queue;
-    private Map<String, String> ssl;
-    private String topic;
-
-    // --- Initial connection settings ---
-    private int connectTimeoutInMillis = 60000;
-    private int connectRetries = 10;
-    private int connectRetriesPerHost = 5;
-
-    /**
-     * Number of times to retry re-establishing a dropped connection after it was live.
-     * 60 retries * 3000ms wait = up to 3 minutes of reconnect attempts.
-     * Solace handles this at TCP/transport level (different from Spring cache layer).
-     */
-    private int reconnectRetries = 60;
-
-    /**
-     * Wait time in milliseconds between reconnect attempts.
-     * Gives the broker time to recover before the next attempt.
-     */
-    private int reconnectRetryWaitInMillis = 3000;
-
-    /**
-     * Interval in milliseconds at which keep-alive heartbeat frames are sent.
-     * Detects silently dead connections (e.g. firewall dropping idle TCP without RST).
-     * Note: setKeepAliveLimit does NOT exist on SolConnectionFactory API —
-     * the missed-heartbeat threshold is configured on the broker side, not the client.
-     */
-    private int keepAliveIntervalInMillis = 3000;
-}
-
-package com.scb.scroeconnect.solaceworker.converter;
-
-import jakarta.persistence.AttributeConverter;
-import jakarta.persistence.Converter;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
-@Converter(autoApply = false)
-public class JsonNodeConverter implements AttributeConverter<JsonNode, String> {
-
-    private static final ObjectMapper objectMapper = new ObjectMapper();
-
-    @Override
-    public String convertToDatabaseColumn(JsonNode attribute) {
-        if (attribute == null) return null;
-        try {
-            return attribute.toString();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize JsonNode to text", e);
-        }
-    }
-
-    @Override
-    public JsonNode convertToEntityAttribute(String dbData) {
-        if (dbData == null) return null;
-        try {
-            return objectMapper.readTree(dbData);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to deserialize JSON from DB column", e);
-        }
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto;
-
-import lombok.Data;
-import tools.jackson.databind.JsonNode;
-
-@Data
-public class FinalWebhookBodyDto {
-    private String dealRefId;
-    private String eventType;
-    private String dealCountry;
-    private JsonNode eventDetails;
-}
-
-package com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto;
-
-import lombok.Data;
-
-@Data
-public class FinalWebhookHeaderDto {
-    private String webhookType;
-    private String ScroeClientId;
-    private String clientGroupId;
-    private String messageId;
-}
-
-package com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto;
-
-import lombok.Data;
-
-import java.util.List;
-
-@Data
-public class FinalWebhookPayloadDto {
-    private FinalWebhookHeaderDto header;
-    private FinalWebhookBodyDto data;
-}
-
-package com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto;
-
-import lombok.Data;
-
-@Data
-public class TransformedWebhookBodyDto {
-    private String dealRefId;
-    private String eventType;
-    private String dealCountry;
-    private String eventDetails;
-}
-
-package com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto;
-
-import lombok.Data;
-
-@Data
-public class TransformedWebhookHeaderDto {
-    private String webhookType;
-    private String ScroeClientId;
-    private String clientGroupId;
-}
-
-package com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto;
-
-import lombok.Data;
-
-import java.util.List;
-
-@Data
-public class TransformedWebhookPayloadDto {
-    private TransformedWebhookHeaderDto header;
-    private TransformedWebhookBodyDto data;
-}
-
-package com.scb.scroeconnect.solaceworker.mapper;
-
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.*;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedWebhookBodyDto;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedWebhookPayloadDto;
 import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-import lombok.RequiredArgsConstructor;
+import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceWorker;
+import com.scb.scroeconnect.solaceworker.entity.NotificationEvent;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationEventRepository;
+import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceWorkerRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import java.util.UUID;
+import java.time.ZonedDateTime;
 
 @Component
-@RequiredArgsConstructor
-public class FinalWebhookPayloadMapper {
+public class SaveFinalPayloadUtil
+{
+        @Autowired
+        ConnectNotificationEventRepository connectNotificationEventRepository;
 
-    private final ObjectMapper objectMapper;
+        @Autowired
+        ConnectSolaceWorkerRepository connectSolaceWorkerRepository;
 
-    public FinalWebhookPayloadDto buildFinalPayload(TransformedWebhookPayloadDto payload, ConnectNotificationDelivery delivery) {
-        FinalWebhookPayloadDto finalPayload = new FinalWebhookPayloadDto();
-        FinalWebhookHeaderDto header = buildHeader(payload, delivery);
-        FinalWebhookBodyDto body = buildBody(payload);
-        finalPayload.setHeader(header);
-        finalPayload.setData(body);
-        return finalPayload;
+        private static final ObjectMapper mapper = new ObjectMapper();
+
+    public void saveFinalPayload(ConnectNotificationDelivery delivery, Object finalPayload, String deliveryMode) throws RuntimeException {
+        NotificationEvent notificationEvent = connectNotificationEventRepository
+                .findByEventId(delivery.getNotificationEvent().getEventId())
+                .orElseThrow(() -> new RuntimeException("ALERT TO PSS, Event not found for ID: " + delivery.getNotificationEvent().getEventId()));
+
+        // Create and populate the ConnectNotificationEmailInfo entity
+        ConnectSolaceWorker connectSolaceWorker = new ConnectSolaceWorker();
+        connectSolaceWorker.setDeliveryMode(deliveryMode);
+        connectSolaceWorker.setNotificationEvent(notificationEvent);
+        connectSolaceWorker.setFinalPayload(mapper.valueToTree(finalPayload));
+        connectSolaceWorker.setSendAt(ZonedDateTime.now());
+        connectSolaceWorker.setNotificationDelivery(delivery);
+
+        // Save the entity
+        connectSolaceWorkerRepository.save(connectSolaceWorker);
     }
 
-    private FinalWebhookHeaderDto buildHeader(TransformedWebhookPayloadDto payload, ConnectNotificationDelivery delivery) {
-        FinalWebhookHeaderDto header = new FinalWebhookHeaderDto();
-        String msgId = String.valueOf(UUID.randomUUID());
-        header.setScroeClientId(payload.getHeader().getScroeClientId());
-        header.setWebhookType(payload.getHeader().getWebhookType());
-        header.setClientGroupId(payload.getHeader().getClientGroupId());
-        header.setMessageId(msgId);
-        return header;
-    }
-
-    private FinalWebhookBodyDto buildBody(TransformedWebhookPayloadDto payload) {
-        TransformedWebhookBodyDto payloadBody = payload.getData();
-        FinalWebhookBodyDto body = new FinalWebhookBodyDto();
-        body.setDealRefId(payloadBody.getDealRefId());
-        body.setEventType(payloadBody.getEventType());
-        body.setDealCountry(payloadBody.getDealCountry());
-        try {
-            JsonNode eventDetailsNode = objectMapper.readTree(payloadBody.getEventDetails());
-
-            body.setEventDetails(eventDetailsNode);
-
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to parse eventDetails", e);
-        }
-
-        return body;
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.service;
-
-import jakarta.jms.TextMessage;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.jms.core.JmsTemplate;
-import org.springframework.stereotype.Service;
-
-@Log4j2
-@Service
-public class SolaceProducerService {
-
-    private final JmsTemplate jmsTemplate;
-
-    public SolaceProducerService(@Qualifier("solaceJmsTemplate") JmsTemplate jmsTemplate) {
-        this.jmsTemplate = jmsTemplate;
-    }
-
-    public void sendMessage(String topic, String payload, String eventId) {
-        jmsTemplate.send(topic, session -> {
-            TextMessage message = session.createTextMessage(payload);
-            message.setJMSCorrelationID(eventId);
-            message.setJMSMessageID(eventId);
-            message.setJMSTimestamp(System.currentTimeMillis());
-            log.info("Solace Notification Sent, JMS Message ID: {}", eventId);
-            return message;
-        });
-    }
 }
 
 package com.scb.scroeconnect.solaceworker.service;
@@ -597,134 +156,125 @@ public class SolaceWorkerService {
 
 }
 
-package com.scb.scroeconnect.solaceworker.service;
+package com.scb.scroeconnect.solaceworker.config;
 
-import jakarta.jms.TextMessage;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.jms.core.JmsTemplate;
-import org.springframework.stereotype.Service;
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
 
-@Log4j2
-@Service
-public class WebhookProducerService {
-
-    private final JmsTemplate jmsTemplate;
-
-    public WebhookProducerService(@Qualifier("webhookJmsTemplate") JmsTemplate jmsTemplate) {
-        this.jmsTemplate = jmsTemplate;
-    }
-
-    public void sendWebhookMessage(String topic, String payload, String eventId) {
-        jmsTemplate.send(topic, session -> {
-            TextMessage message = session.createTextMessage(payload);
-            message.setJMSCorrelationID(eventId);
-            message.setJMSMessageID(eventId);
-            message.setJMSTimestamp(System.currentTimeMillis());
-            log.info("Webhook Solace Notification Sent, JMS Message ID: {}", eventId);
-            return message;
-        });
-    }
+@Getter
+@Setter
+@Configuration
+@ConfigurationProperties(prefix = "solace.thread")
+public class SolaceThreadProperties {
+    private int corePoolSize;
+    private int maxPoolSize;
+    private int queueCapacity;
+    private String namePrefix;
+    private int cacheSize;
 }
+
+package com.scb.scroeconnect.solaceworker.config;
+
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.Map;
+
+@Getter
+@Setter
+@Configuration
+@ConfigurationProperties(prefix = "solace.webhook")
+public class WebhookProperties {
+    private Map<String, String> queue;
+    private Map<String, String> ssl;
+    private String topic;
+
+    // --- Initial connection settings ---
+    private int connectTimeoutInMillis = 60000;
+    private int connectRetries = 10;
+    private int connectRetriesPerHost = 5;
+
+    /**
+     * Number of times to retry re-establishing a dropped connection after it was live.
+     * 60 retries * 3000ms wait = up to 3 minutes of reconnect attempts.
+     * Solace handles this at TCP/transport level (different from Spring cache layer).
+     */
+    private int reconnectRetries = 60;
+
+    /**
+     * Wait time in milliseconds between reconnect attempts.
+     * Gives the broker time to recover before the next attempt.
+     */
+    private int reconnectRetryWaitInMillis = 3000;
+
+    /**
+     * Interval in milliseconds at which keep-alive heartbeat frames are sent.
+     * Detects silently dead connections (e.g. firewall dropping idle TCP without RST).
+     * Note: setKeepAliveLimit does NOT exist on SolConnectionFactory API —
+     * the missed-heartbeat threshold is configured on the broker side, not the client.
+     */
+    private int keepAliveIntervalInMillis = 3000;
+}
+
 
 package com.scb.scroeconnect.solaceworker.util;
 
+//import com.fasterxml.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectMapper;
-import com.scb.scroeconnect.solaceworker.service.SolaceProducerService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.stereotype.Component;
-
-import java.util.UUID;
-
-@Component
-@Log4j2
-@RequiredArgsConstructor
-public class PublishToSolaceUtil {
-
-    private final ObjectMapper objectMapper;
-    private final SolaceProducerService solaceConnectionConfig;
-
-    public boolean publishToSolace(Object finalPayload, UUID eventId, String topic) {
-        try {
-            String message = objectMapper.writeValueAsString(finalPayload);
-            log.info("Solace Final Payload Message : {}", message);
-            log.info("Get Solace Topic {}", topic);
-            solaceConnectionConfig.sendMessage(topic, message, eventId.toString());
-            return true;
-        } catch (Exception e) {
-            log.error("Exception occurred while sending Solace Notification: ", e);
-            return false;
-        }
-    }
-}
-
-package com.scb.scroeconnect.solaceworker.util;
-
-import com.scb.scroeconnect.solaceworker.service.WebhookProducerService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.stereotype.Component;
-import tools.jackson.databind.ObjectMapper;
-
-import java.util.UUID;
-
-@Component
-@Log4j2
-@RequiredArgsConstructor
-public class PublishToWebhookUtil {
-
-    private final ObjectMapper objectMapper;
-    private final WebhookProducerService webhookProducerService;
-
-    public boolean publishToSolace(Object finalPayload, UUID eventId, String topic) {
-        try {
-            String message = objectMapper.writeValueAsString(finalPayload);
-            log.info("Webhook Solace Final Payload Message : {}", message);
-            log.info("Get Solace Topic {}", topic);
-            webhookProducerService.sendWebhookMessage(topic, message, eventId.toString());
-            return true;
-        } catch (Exception e) {
-            log.error("Exception occurred while sending Webhook Solace Notification: ", e);
-            return false;
-        }
-    }
-
-}
-
-package com.scb.scroeconnect.solaceworker.util;
-
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedWebhookPayloadDto;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
+import com.scb.scroeconnect.solaceworker.dto.TrailerDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedBodyDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedHeaderDto;
 import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.stereotype.Component;
+import com.scb.scroeconnect.solaceworker.entity.*;
 
-@Component
-@Log4j2
-@RequiredArgsConstructor
-public class ParseTransformedPayloadUtil {
-    private final ObjectMapper objectMapper;
+import java.util.List;
+import java.util.UUID;
 
-    public TransformedPayloadDto parseTransformedPayload(JsonNode payload) {
+public class TestPayloadFactory {
+    public static ConnectNotificationDelivery validDelivery() {
         try {
-            return objectMapper.treeToValue(payload, TransformedPayloadDto.class);
+            ObjectMapper mapper = new ObjectMapper();
+            String payload = mapper.writeValueAsString(validTransformedPayload());
+
+            ConnectNotificationDelivery d = new ConnectNotificationDelivery();
+            d.setId(1L);
+            d.setTransformedPayload(payload);
+
+            Recipient r = new Recipient();
+            r.setId(1L);
+            d.setRecipient(r);
+
+            NotificationEvent e = new NotificationEvent();
+            e.setEventId(UUID.randomUUID());
+            d.setNotificationEvent(e);
+
+            return d;
         } catch (Exception e) {
-            log.error("ALERT TO PSS, Error parsing transformed payload: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to parse transformed payload", e);
+            throw new RuntimeException(e);
         }
     }
 
-    public TransformedWebhookPayloadDto parseWebhookPayload(JsonNode payload) {
-        try {
-            return objectMapper.treeToValue(payload, TransformedWebhookPayloadDto.class);
-        } catch (Exception e) {
-            log.error("ALERT TO PSS, Error parsing webhook payload: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to parse webhook payload", e);
-        }
+
+    private static TransformedPayloadDto validTransformedPayload() {
+        TransformedPayloadDto dto = new TransformedPayloadDto();
+        dto.setHeader(new TransformedHeaderDto());
+        dto.setTrailer(new TrailerDto());
+
+        TransformedBodyDto body =
+                new TransformedBodyDto();
+        body.setAmount("100");
+        body.setTxnDate("2024-01-01T00:00:00");
+
+        dto.setBody(List.of(body));
+        return dto;
     }
 }
 
-Write Testcases for all the above classes with 100% line coverage no matter the exception or status code just want 100% line coevrage.
+Error: Required type:
+JsonNode
+Provided:
+String
