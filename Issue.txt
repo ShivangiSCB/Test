@@ -1,328 +1,294 @@
-package com.scb.scroeconnect.emailworker.entity;
+package com.scb.scroeconnect.solaceworker.config;
 
-import com.scb.scroeconnect.emailworker.converter.JsonNodeUserType;
-import jakarta.persistence.*;
-import lombok.*;
-import org.hibernate.annotations.Type;
-import tools.jackson.databind.JsonNode;
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
-import java.time.ZonedDateTime;
+@Getter
+@Setter
+@Component
+public class RecipientIdConfig {
+    @Value("${solace.s2bl.recipientId}")
+    private int solaceRecipientId;
 
-@Data
-@AllArgsConstructor
-@NoArgsConstructor
-@Entity
-@Table(name = "connect_notification_delivery")
-
-public class ConnectNotificationDelivery extends BaseEntity {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "event_id",referencedColumnName = "event_id",nullable = false)
-    private ConnectNotificationEvent notificationEvent;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "recipient_id", nullable = false)
-    private ConnectNotificationRecipient recipient;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "template_id", nullable = false)
-    private ConnectNotificationTemplate notificationTemplate;
-
-    @Column(name = "delivery_mode", nullable = false)
-    private String deliveryMode;
-
-    @Type(JsonNodeUserType.class)
-    @Column(columnDefinition = "jsonb",name = "transformed_payload")
-    private JsonNode transformedPayload;
-
-    @Column(nullable = false)
-    private String status;
-
-    @Column(name = "retry_count", nullable = false)
-    private int retryCount;
-
-    @Column(name = "available_at", nullable = false)
-    private ZonedDateTime availableAt;
-
-
-
-//    public ConnectNotificationDelivery(ConnectNotificationEvent notificationEvent, ConnectNotificationRecipient recipient, ConnectNotificationTemplate notificationTemplate, String deliveryMode, String transformedPayload, String status, int retryCount, Timestamp availableAt) {
-//        this.notificationEvent = notificationEvent;
-//        this.recipient = recipient;
-//        this.notificationTemplate = notificationTemplate;
-//        this.deliveryMode = deliveryMode;
-//        this.transformedPayload = transformedPayload;
-//        this.status = status;
-//        this.retryCount = retryCount;
-//        this.availableAt = availableAt;
-//    }
-
+    @Value("${solace.webhook.recipientId}")
+    private int webhookRecipientId;
 }
 
-package com.scb.scroeconnect.emailworker.service;
+package com.scb.scroeconnect.solaceworker.config;
 
-import com.scb.scroeconnect.emailworker.config.EmailWorkerConfig;
-import com.scb.scroeconnect.emailworker.config.RetryableRestTemplate;
-import com.scb.scroeconnect.emailworker.dto.EmailRequestDTO;
-import com.scb.scroeconnect.emailworker.dto.TransformedPayloadDTO;
-import com.scb.scroeconnect.emailworker.entity.ConnectEventEmailConfig;
-import com.scb.scroeconnect.emailworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.emailworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.emailworker.repository.ConnectEventEmailConfigRepository;
-import com.scb.scroeconnect.emailworker.repository.ConnectNotificationDeliveryRepository;
-import com.scb.scroeconnect.emailworker.util.RetryHandler;
-import com.scb.scroeconnect.emailworker.util.SaveFinalPayloadUtil;
-import jakarta.transaction.Transactional;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.*;
-import org.springframework.stereotype.Service;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ObjectNode;
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
 
-import java.util.Iterator;
 import java.util.Map;
+
+@Getter
+@Setter
+@Configuration
+@ConfigurationProperties(prefix = "solace.webhook")
+public class WebhookProperties {
+    private Map<String, String> queue;
+    private Map<String, String> ssl;
+    private String topic;
+
+    // --- Initial connection settings ---
+    private int connectTimeoutInMillis = 60000;
+    private int connectRetries = 10;
+    private int connectRetriesPerHost = 5;
+
+    /**
+     * Number of times to retry re-establishing a dropped connection after it was live.
+     * 60 retries * 3000ms wait = up to 3 minutes of reconnect attempts.
+     * Solace handles this at TCP/transport level (different from Spring cache layer).
+     */
+    private int reconnectRetries = 60;
+
+    /**
+     * Wait time in milliseconds between reconnect attempts.
+     * Gives the broker time to recover before the next attempt.
+     */
+    private int reconnectRetryWaitInMillis = 3000;
+
+    /**
+     * Interval in milliseconds at which keep-alive heartbeat frames are sent.
+     * Detects silently dead connections (e.g. firewall dropping idle TCP without RST).
+     * Note: setKeepAliveLimit does NOT exist on SolConnectionFactory API —
+     * the missed-heartbeat threshold is configured on the broker side, not the client.
+     */
+    private int keepAliveIntervalInMillis = 3000;
+}
+
+package com.scb.scroeconnect.solaceworker.config;
+
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
+@Getter
+@Setter
+@Configuration
+@ConfigurationProperties(prefix = "solace.thread")
+public class SolaceThreadProperties {
+    private int corePoolSize;
+    private int maxPoolSize;
+    private int queueCapacity;
+    private String namePrefix;
+    private int cacheSize;
+}
+
+package com.scb.scroeconnect.solaceworker.dto.CreditDebitDto;
+
+import lombok.Data;
+
+@Data
+public class CreditDebitDataDto {
+    private String vaultNo;
+    private String dealRefId;
+    private String treeNumber;
+    private String dealCountry;
+    private String transactionDate;
+    private String transactionAmount;
+    private String transactionCurrency;
+    private String transactionIndicator;
+    private String transactionRefNumber;
+    private String physicalAccountNumber;
+}
+
+package com.scb.scroeconnect.solaceworker.dto.CreditDebitDto;
+
+import lombok.Data;
+
+@Data
+public class CreditDebitDataTransformedDto {
+    private String vaultNo;
+    private String dealRefId;
+    private String treeNumber;
+    private String dealCountry;
+    private String transactionDate;
+    private String transactionAmount;
+    private String transactionCurrency;
+    private String transactionIndicator;
+    private String transactionRefNumber;
+    private String physicalAccountNumber;
+}
+
+package com.scb.scroeconnect.solaceworker.dto.CreditDebitDto;
+
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedWebhookHeaderDto;
+import lombok.Data;
+
+@Data
+public class CreditDebitDto {
+    private TransformedWebhookHeaderDto header;
+    private CreditDebitDataTransformedDto data;
+}
+
+package com.scb.scroeconnect.solaceworker.dto.CreditDebitDto;
+
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalWebhookHeaderDto;
+import lombok.Data;
+
+@Data
+public class CreditDebitFinalDto {
+    private FinalWebhookHeaderDto header;
+    private CreditDebitDataDto data;
+}
+package com.scb.scroeconnect.solaceworker.service;
+
+import com.scb.scroeconnect.solaceworker.config.RecipientIdConfig;
+import com.scb.scroeconnect.solaceworker.dto.CreditDebitDto.CreditDebitDto;
+import com.scb.scroeconnect.solaceworker.dto.CreditDebitDto.CreditDebitFinalDto;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalWebhookPayloadDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedWebhookPayloadDto;
+import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
+import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
+import com.scb.scroeconnect.solaceworker.mapper.FinalPayloadMapper;
+import com.scb.scroeconnect.solaceworker.mapper.FinalWebhookPayloadMapper;
+import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
+import com.scb.scroeconnect.solaceworker.util.*;
+import lombok.AllArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
+import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
+
 import java.util.Optional;
 import java.util.UUID;
 
 @Log4j2
 @Service
-public class EmailWorkerService {
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    private final ConnectEventEmailConfigRepository connectEventEmailConfigRepository;
-    private final RetryableRestTemplate restTemplate;
-    private final EmailWorkerConfig emailWorkerConfig;
+@AllArgsConstructor
+public class SolaceWorkerService {
 
+    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
     @Autowired
     private final RetryHandler retryHandler;
-
+    private final PublishToSolaceUtil publishToSolace;
+    private final ParseTransformedPayloadUtil parseTransformedPayload;
     private final SaveFinalPayloadUtil saveFinalPayloadUtil;
-
-
-    public EmailWorkerService(ConnectEventEmailConfigRepository connectEventEmailConfigRepository, RetryableRestTemplate restTemplate, EmailWorkerConfig emailWorkerConfig, ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository,RetryHandler retryHandler, SaveFinalPayloadUtil saveFinalPayloadUtil) {
-        this.connectEventEmailConfigRepository = connectEventEmailConfigRepository;
-        this.restTemplate = restTemplate;
-        this.emailWorkerConfig = emailWorkerConfig;
-        this.connectNotificationDeliveryRepository = connectNotificationDeliveryRepository;
-        //this.emailAsyncProcessorService = emailAsyncProcessorService;
-        this.retryHandler=retryHandler;
-        this.saveFinalPayloadUtil=saveFinalPayloadUtil;
-
-    }
+    private final FinalPayloadMapper finalPayloadMapper;
+    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
+    private final FinalWebhookPayloadMapper finalWebhookPayloadMapper;
+    private final PublishToWebhookUtil publishToWebhook;
+    private final RecipientIdConfig recipientIdConfig;
 
     @Transactional
-    public void sendEmailNotification(ConnectNotificationDelivery connectNotificationDelivery) throws JacksonException {
-        log.info("Processing email notification for delivery ID: {}", connectNotificationDelivery.getId());
-
-        // Get the final payload
-        EmailRequestDTO finalPayload = getFinalPayload(connectNotificationDelivery);
-
-        // Send the email
-        boolean emailSent = sendEmail(finalPayload,connectNotificationDelivery.getNotificationEvent().getEventId());
-        if (emailSent) {
-            log.info("Email sent successfully for delivery ID: {}", connectNotificationDelivery.getId());
-            connectNotificationDeliveryRepository.updateStatusById(connectNotificationDelivery.getId(), DeliveryStatus.SENT.toString());
-            saveFinalPayloadUtil.saveFinalPayload(connectNotificationDelivery,finalPayload);
-        } else {
-            log.warn("Failed to send email for delivery ID: {}", connectNotificationDelivery.getId());
-            retryHandler.handleFailure(connectNotificationDelivery);
-
-        }
-    }
-
-    public EmailRequestDTO getFinalPayload(ConnectNotificationDelivery delivery) throws JacksonException {
-        log.info("Generating final payload for delivery ID: {}", delivery.getId());
-
-        // Deserialize transformedPayload into TransformedPayloadDTO
-        JsonNode transformedPayload = delivery.getTransformedPayload();
-        if (transformedPayload == null) {
-            throw new IllegalStateException("Transformed payload is null");
-        }
-        TransformedPayloadDTO payload = OBJECT_MAPPER.treeToValue(transformedPayload, TransformedPayloadDTO.class);
-
-        // Retrieve email configuration
-        Optional<ConnectEventEmailConfig> connectEventEmailConfigOptional = connectEventEmailConfigRepository.findByRecipientId(delivery.getRecipient().getId());
-        if (connectEventEmailConfigOptional.isEmpty()) {
-            throw new IllegalStateException("No email configuration found for recipient ID: " + delivery.getRecipient().getId());
-        }
-        ConnectEventEmailConfig connectEventEmailConfig = connectEventEmailConfigOptional.get();
-
-        // Extract contentBody from TransformedPayloadDTO and encode as Base64
-        String contentBody = payload.getContentBody();
-
-        // Construct EmailRequestDTO
-        EmailRequestDTO finalPayload = new EmailRequestDTO();
-
-        String subject = payload.getSubject();
-        if ("VAM-VBAN Creation".equalsIgnoreCase(subject)) {
-            finalPayload.set_id("2001");
-        } else if ("VAM-VBAN Deletion".equalsIgnoreCase(subject)) {
-            finalPayload.set_id("2002");
-        }
-        finalPayload.setCountry(payload.getCountry());
-        finalPayload.setRecipients(connectEventEmailConfig.getRecipients());
-        finalPayload.setCc(connectEventEmailConfig.getCc());
-        finalPayload.setBcc(connectEventEmailConfig.getBcc());
-        finalPayload.setReplyTo(connectEventEmailConfig.getReplyTo());
-        finalPayload.setNotificationType(payload.getNotificationType());
-        finalPayload.setSubject(payload.getSubject());
-        finalPayload.setContentType(payload.getContentType());
-        finalPayload.setContentBody(contentBody);
-        finalPayload.setEncoding("Base64");
-        finalPayload.setPriority(payload.getPriority());
-        finalPayload.setAttachments(null); // For now
-
-        // Remove null fields
-        removeNullFields(finalPayload);
-
-        log.info("Generated final payload: {}", finalPayload);
-        return finalPayload;
-    }
-
-    private boolean sendEmail(EmailRequestDTO finalPayload, UUID trackingId) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("TrackingId", trackingId.toString());
-
-        HttpEntity<EmailRequestDTO> requestEntity = new HttpEntity<>(finalPayload, headers);
-        ResponseEntity<String> response = restTemplate.exchange(
-                    emailWorkerConfig.getSendEmailApi(),
-                    HttpMethod.POST,
-                    requestEntity);
-        System.out.println(finalPayload.toString());
-        if (!response.getStatusCode().is2xxSuccessful()) {
-            log.error("Failed to send email. Response: {}", response.getBody());
-            //throw new RuntimeException("Failed to send email");
-            return false;
-        }
-        return true;
-
-    }
-
-    private void removeNullFields(EmailRequestDTO finalPayload) {
+    public void sendSolaceNotification(ConnectNotificationDelivery delivery) {
         try {
-            ObjectNode objectNode = OBJECT_MAPPER.valueToTree(finalPayload);
+            log.info("Processing Notification for Delivery ID: {}", delivery.getId());
 
-            // Remove all fields with null values
-            Iterator<Map.Entry<String, JsonNode>> fields = objectNode.properties().iterator();
-            while (fields.hasNext()) {
-                if (fields.next().getValue().isNull()) {
-                    fields.remove();
-                }
+            JsonNode transformedPayload = delivery.getPayload();
+
+            Long recipientId = delivery.getRecipient().getId();
+            UUID eventId = delivery.getNotificationEvent().getEventId();
+
+            Optional<ConnectSolaceConfig> configOpt = connectSolaceConfigRepository.findByRecipientIdAndActive(recipientId);
+
+            if (configOpt.isEmpty()) {
+                log.error("No topic config found for recipientId: {}", recipientId);
+                retryHandler.handleFailure(delivery);
+                return;
             }
 
-            // Update the finalPayload object with the modified ObjectNode
-            OBJECT_MAPPER.readerForUpdating(finalPayload).readValue(objectNode);
+            String topic = configOpt.get().getTopic();
+            log.info("Recipient_id is {}",recipientId);
+            if (recipientId == recipientIdConfig.getSolaceRecipientId()) { // SOLACE FLOW
+                TransformedPayloadDto payload = parseTransformedPayload.parseTransformedPayload(transformedPayload);
+
+                FinalPayloadDto finalPayload = finalPayloadMapper.buildFinalPayload(payload, delivery);
+
+                boolean published = publishToSolace.publishToSolace(finalPayload, eventId, topic);
+
+                handleResult(delivery, published, finalPayload, "Solace");
+
+            } else if (recipientId == recipientIdConfig.getWebhookRecipientId()) { // WEBHOOK FLOW
+                if (transformedPayload.has("data") && transformedPayload.path("data").has("transactionIndicator")) {
+                    CreditDebitDto payload = parseTransformedPayload.parseCDDto(transformedPayload);
+                    CreditDebitFinalDto finalPayload = finalWebhookPayloadMapper.buildFinalDto(payload, delivery);
+                    boolean published = publishToWebhook.publishToSolace(finalPayload, eventId, topic);
+                    handleResult(delivery, published, finalPayload, "Webhook");
+                } else {
+                    TransformedWebhookPayloadDto payload = parseTransformedPayload.parseWebhookPayload(transformedPayload);
+                    FinalWebhookPayloadDto finalPayload = finalWebhookPayloadMapper.buildFinalPayload(payload, delivery);
+                    boolean published = publishToWebhook.publishToSolace(finalPayload, eventId, topic);
+                    handleResult(delivery, published, finalPayload, "Webhook");
+                }
+
+            } else {
+                log.error("Failed to send Notification for eventId: {}", eventId);
+                retryHandler.handleFailure(delivery);
+            }
+
         } catch (Exception e) {
-            throw new RuntimeException("Failed to remove null fields", e);
+            log.error("ALERT TO PSS:- Failed to process notification: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to send Notification", e);
         }
     }
+
+    private void handleResult(ConnectNotificationDelivery delivery, boolean published, Object payload, String type) {
+        if (published) {
+            log.info("{} Notification sent successfully for delivery ID: {}", type, delivery.getId());
+
+            connectNotificationDeliveryRepository.updateStatusById(delivery.getId(), DeliveryStatus.SENT.toString());
+
+            saveFinalPayloadUtil.saveFinalPayload(delivery, payload, type);
+
+        } else {
+            log.error("Failed to send {} Notification delivery ID: {}", type, delivery.getId());
+            retryHandler.handleFailure(delivery);
+        }
+    }
+
 }
+package com.scb.scroeconnect.solaceworker.util;
 
-package com.scb.scroeconnect.emailworker.converter;
-
-import org.hibernate.HibernateException;
-import org.hibernate.type.descriptor.WrapperOptions;
-import org.hibernate.usertype.UserType;
-import org.postgresql.util.PGobject;
-import tools.jackson.databind.JsonNode;
+import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
+import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceWorker;
+import com.scb.scroeconnect.solaceworker.entity.NotificationEvent;
+import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationEventRepository;
+import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceWorkerRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-import java.io.Serializable;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Types;
+import java.time.ZonedDateTime;
 
-public class JsonNodeUserType implements UserType<JsonNode> {
+@Component
+public class SaveFinalPayloadUtil
+{
+        @Autowired
+        ConnectNotificationEventRepository connectNotificationEventRepository;
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+        @Autowired
+        ConnectSolaceWorkerRepository connectSolaceWorkerRepository;
 
-    @Override
-    public int getSqlType() {
-        return Types.OTHER;
+        private static final ObjectMapper mapper = new ObjectMapper();
+
+    public void saveFinalPayload(ConnectNotificationDelivery delivery, Object finalPayload, String deliveryMode) throws RuntimeException {
+        NotificationEvent notificationEvent = connectNotificationEventRepository
+                .findByEventId(delivery.getNotificationEvent().getEventId())
+                .orElseThrow(() -> new RuntimeException("ALERT TO PSS, Event not found for ID: " + delivery.getNotificationEvent().getEventId()));
+
+        // Create and populate the ConnectNotificationEmailInfo entity
+        ConnectSolaceWorker connectSolaceWorker = new ConnectSolaceWorker();
+        connectSolaceWorker.setDeliveryMode(deliveryMode);
+        connectSolaceWorker.setNotificationEvent(notificationEvent);
+        connectSolaceWorker.setFinalPayload(mapper.valueToTree(finalPayload));
+        connectSolaceWorker.setSendAt(ZonedDateTime.now());
+        connectSolaceWorker.setNotificationDelivery(delivery);
+
+        // Save the entity
+        connectSolaceWorkerRepository.save(connectSolaceWorker);
     }
 
-    @Override
-    public Class<JsonNode> returnedClass() {
-        return JsonNode.class;
-    }
-
-    @Override
-    public boolean equals(JsonNode x, JsonNode y) {
-        if (x == null) return y == null;
-        return x.equals(y);
-    }
-
-    @Override
-    public int hashCode(JsonNode x) {
-        return x == null ? 0 : x.hashCode();
-    }
-
-    @Override
-    public JsonNode nullSafeGet(ResultSet rs, int position, WrapperOptions options)
-            throws HibernateException, SQLException {
-        String value = rs.getString(position);
-        if (value == null) return null;
-        try {
-            return MAPPER.readTree(value);
-        } catch (Exception e) {
-            throw new HibernateException("Failed to deserialize jsonb column to JsonNode", e);
-        }
-    }
-
-    @Override
-    public void nullSafeSet(PreparedStatement st, JsonNode value, int index, WrapperOptions options)
-            throws HibernateException, SQLException {
-        if (value == null) {
-            st.setNull(index, Types.OTHER);
-        } else {
-            try {
-                PGobject pgObject = new PGobject();
-                pgObject.setType("jsonb");
-                pgObject.setValue(value.toString());
-                st.setObject(index, pgObject);
-            } catch (Exception e) {
-                throw new HibernateException("Failed to serialize JsonNode to jsonb", e);
-            }
-        }
-    }
-
-    @Override
-    public JsonNode deepCopy(JsonNode value) {
-        return value == null ? null : value.deepCopy();
-    }
-
-    @Override
-    public boolean isMutable() { return true; }
-
-    @Override
-    public Serializable disassemble(JsonNode value) {
-        return value == null ? null : value.toString();
-    }
-
-    @Override
-    public JsonNode assemble(Serializable cached, Object owner) {
-        if (cached == null) return null;
-        try {
-            return MAPPER.readTree((String) cached);
-        } catch (Exception e) {
-            throw new HibernateException("Failed to assemble cached JSON to JsonNode", e);
-        }
-    }
-}
-package com.scb.scroeconnect.emailworker.enums;
-
-public enum DeliveryStatus {
-    PENDING,
-    SENT,
-    RETRY,
-    FAILED;
 }
