@@ -1,294 +1,164 @@
-package com.scb.scroeconnect.solaceworker.config;
-
-import lombok.Getter;
-import lombok.Setter;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
-@Getter
-@Setter
-@Component
-public class RecipientIdConfig {
-    @Value("${solace.s2bl.recipientId}")
-    private int solaceRecipientId;
-
-    @Value("${solace.webhook.recipientId}")
-    private int webhookRecipientId;
-}
-
-package com.scb.scroeconnect.solaceworker.config;
-
-import lombok.Getter;
-import lombok.Setter;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
-
-import java.util.Map;
-
-@Getter
-@Setter
-@Configuration
-@ConfigurationProperties(prefix = "solace.webhook")
-public class WebhookProperties {
-    private Map<String, String> queue;
-    private Map<String, String> ssl;
-    private String topic;
-
-    // --- Initial connection settings ---
-    private int connectTimeoutInMillis = 60000;
-    private int connectRetries = 10;
-    private int connectRetriesPerHost = 5;
-
-    /**
-     * Number of times to retry re-establishing a dropped connection after it was live.
-     * 60 retries * 3000ms wait = up to 3 minutes of reconnect attempts.
-     * Solace handles this at TCP/transport level (different from Spring cache layer).
-     */
-    private int reconnectRetries = 60;
-
-    /**
-     * Wait time in milliseconds between reconnect attempts.
-     * Gives the broker time to recover before the next attempt.
-     */
-    private int reconnectRetryWaitInMillis = 3000;
-
-    /**
-     * Interval in milliseconds at which keep-alive heartbeat frames are sent.
-     * Detects silently dead connections (e.g. firewall dropping idle TCP without RST).
-     * Note: setKeepAliveLimit does NOT exist on SolConnectionFactory API —
-     * the missed-heartbeat threshold is configured on the broker side, not the client.
-     */
-    private int keepAliveIntervalInMillis = 3000;
-}
-
-package com.scb.scroeconnect.solaceworker.config;
-
-import lombok.Getter;
-import lombok.Setter;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
-
-@Getter
-@Setter
-@Configuration
-@ConfigurationProperties(prefix = "solace.thread")
-public class SolaceThreadProperties {
-    private int corePoolSize;
-    private int maxPoolSize;
-    private int queueCapacity;
-    private String namePrefix;
-    private int cacheSize;
-}
-
-package com.scb.scroeconnect.solaceworker.dto.CreditDebitDto;
-
-import lombok.Data;
-
-@Data
-public class CreditDebitDataDto {
-    private String vaultNo;
-    private String dealRefId;
-    private String treeNumber;
-    private String dealCountry;
-    private String transactionDate;
-    private String transactionAmount;
-    private String transactionCurrency;
-    private String transactionIndicator;
-    private String transactionRefNumber;
-    private String physicalAccountNumber;
-}
-
-package com.scb.scroeconnect.solaceworker.dto.CreditDebitDto;
-
-import lombok.Data;
-
-@Data
-public class CreditDebitDataTransformedDto {
-    private String vaultNo;
-    private String dealRefId;
-    private String treeNumber;
-    private String dealCountry;
-    private String transactionDate;
-    private String transactionAmount;
-    private String transactionCurrency;
-    private String transactionIndicator;
-    private String transactionRefNumber;
-    private String physicalAccountNumber;
-}
-
-package com.scb.scroeconnect.solaceworker.dto.CreditDebitDto;
-
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedWebhookHeaderDto;
-import lombok.Data;
-
-@Data
-public class CreditDebitDto {
-    private TransformedWebhookHeaderDto header;
-    private CreditDebitDataTransformedDto data;
-}
-
-package com.scb.scroeconnect.solaceworker.dto.CreditDebitDto;
-
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalWebhookHeaderDto;
-import lombok.Data;
-
-@Data
-public class CreditDebitFinalDto {
-    private FinalWebhookHeaderDto header;
-    private CreditDebitDataDto data;
-}
-package com.scb.scroeconnect.solaceworker.service;
-
-import com.scb.scroeconnect.solaceworker.config.RecipientIdConfig;
-import com.scb.scroeconnect.solaceworker.dto.CreditDebitDto.CreditDebitDto;
-import com.scb.scroeconnect.solaceworker.dto.CreditDebitDto.CreditDebitFinalDto;
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalWebhookPayloadDto;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedWebhookPayloadDto;
-import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceConfig;
-import com.scb.scroeconnect.solaceworker.enums.DeliveryStatus;
-import com.scb.scroeconnect.solaceworker.mapper.FinalPayloadMapper;
-import com.scb.scroeconnect.solaceworker.mapper.FinalWebhookPayloadMapper;
-import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceConfigRepository;
-import com.scb.scroeconnect.solaceworker.util.*;
-import lombok.AllArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import com.scb.scroeconnect.solaceworker.dto.FinalPayloadDto.FinalPayloadDto;
-import com.scb.scroeconnect.solaceworker.dto.TransformedPayloadDto.TransformedPayloadDto;
-import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationDeliveryRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.JsonNode;
-
-import java.util.Optional;
-import java.util.UUID;
-
-@Log4j2
-@Service
-@AllArgsConstructor
-public class SolaceWorkerService {
-
-    private final ConnectNotificationDeliveryRepository connectNotificationDeliveryRepository;
-    @Autowired
-    private final RetryHandler retryHandler;
-    private final PublishToSolaceUtil publishToSolace;
-    private final ParseTransformedPayloadUtil parseTransformedPayload;
-    private final SaveFinalPayloadUtil saveFinalPayloadUtil;
-    private final FinalPayloadMapper finalPayloadMapper;
-    private final ConnectSolaceConfigRepository connectSolaceConfigRepository;
-    private final FinalWebhookPayloadMapper finalWebhookPayloadMapper;
-    private final PublishToWebhookUtil publishToWebhook;
-    private final RecipientIdConfig recipientIdConfig;
-
-    @Transactional
-    public void sendSolaceNotification(ConnectNotificationDelivery delivery) {
-        try {
-            log.info("Processing Notification for Delivery ID: {}", delivery.getId());
-
-            JsonNode transformedPayload = delivery.getPayload();
-
-            Long recipientId = delivery.getRecipient().getId();
-            UUID eventId = delivery.getNotificationEvent().getEventId();
-
-            Optional<ConnectSolaceConfig> configOpt = connectSolaceConfigRepository.findByRecipientIdAndActive(recipientId);
-
-            if (configOpt.isEmpty()) {
-                log.error("No topic config found for recipientId: {}", recipientId);
-                retryHandler.handleFailure(delivery);
-                return;
+Hello Hi, for the below connect_node query I am getting the error as:
+ 
+INSERT INTO scvprd.connect_node (node_id, node_name, node_policy, node_description, block_id, node_status, is_valid, created_date, updated_date) VALUES('CDG_T_V3_SCHEDULE_PAYMENT_CONTRACT', 'CDG-Trial V3 Schedule Payment via contract', '{
+    "policy": {
+        "category": "category",
+        "dealRefId": "dealRefId",
+        "initiatingParty": "paymentContract.debtor.paymentInfo.partyRefId",
+        "username": "botUserName",
+        "contractDate": "paymentContract.paymentContractDate",
+        "ultimateDebtor": {
+            "dealRefId": "paymentContract.debtor.ultimateDebtor.dealRefId",
+            "partyRefId": "paymentContract.debtor.ultimateDebtor.oboPartyRefId",
+            "name": "paymentContract.debtor.ultimateDebtor.oboInfo.oboName",
+            "country": "paymentContract.debtor.ultimateDebtor.oboInfo.oboCountry",
+            "addressLine1": "paymentContract.debtor.ultimateDebtor.oboInfo.oboAddressLine1",
+            "addressLine2": "paymentContract.debtor.ultimateDebtor.oboInfo.oboAddressLine2"
+        },
+        "paymentInfo": {
+            "partyRefId": "paymentContract.debtor.paymentInfo.partyRefId",
+            "currency": "paymentContract.debtor.paymentInfo.accountCurrency",
+            "country": "paymentContract.debtor.paymentInfo.accountCountry",
+            "amount": "paymentContract.debtor.paymentInfo.paymentContractAmount",
+            "instructedControlSum": "paymentContract.debtor.paymentInfo.instructedControlSum",
+            "equivalentControlSum": "paymentContract.debtor.paymentInfo.equivalentControlSum",
+            "platformRefNo": "platformRefId",
+            "charges": "from.charges",
+            "accountNumber": "paymentContract.debtor.paymentInfo.accountNumber",
+            "virtualAccountNumber": "virtualAccountNumber"
+        },
+        "dynamicAttributes": [
+            {
+                "label": "virtualAccountNumber",
+                "value": "virtualAccountNumber"
+            },
+            {
+                "label": "ultimateDebtor",
+                "value": "paymentContract.debtor.ultimateDebtor"
+            },
+            {
+                "label": "debtorOboDealRefId",
+                "value": "paymentContract.debtor.ultimateDebtor.dealRefId"
+            },
+            {
+                "label": "participantId",
+                "value": "paymentContract.debtor.ultimateDebtor.oboPartyRefId"
+            },
+            {
+                "label": "debtorOboName",
+                "value": "paymentContract.debtor.ultimateDebtor.oboInfo.oboName"
+            },
+            {
+                "label": "debtorOboCountry",
+                "value": "paymentContract.debtor.ultimateDebtor.oboInfo.oboCountry"
+            },
+            {
+                "label": "debtorOboAddressLine1",
+                "value": "paymentContract.debtor.ultimateDebtor.oboInfo.oboAddressLine1"
+            },
+            {
+                "label": "debtorOboAddressLine2",
+                "value": "paymentContract.debtor.ultimateDebtor.oboInfo.oboAddressLine2"
             }
-
-            String topic = configOpt.get().getTopic();
-            log.info("Recipient_id is {}",recipientId);
-            if (recipientId == recipientIdConfig.getSolaceRecipientId()) { // SOLACE FLOW
-                TransformedPayloadDto payload = parseTransformedPayload.parseTransformedPayload(transformedPayload);
-
-                FinalPayloadDto finalPayload = finalPayloadMapper.buildFinalPayload(payload, delivery);
-
-                boolean published = publishToSolace.publishToSolace(finalPayload, eventId, topic);
-
-                handleResult(delivery, published, finalPayload, "Solace");
-
-            } else if (recipientId == recipientIdConfig.getWebhookRecipientId()) { // WEBHOOK FLOW
-                if (transformedPayload.has("data") && transformedPayload.path("data").has("transactionIndicator")) {
-                    CreditDebitDto payload = parseTransformedPayload.parseCDDto(transformedPayload);
-                    CreditDebitFinalDto finalPayload = finalWebhookPayloadMapper.buildFinalDto(payload, delivery);
-                    boolean published = publishToWebhook.publishToSolace(finalPayload, eventId, topic);
-                    handleResult(delivery, published, finalPayload, "Webhook");
-                } else {
-                    TransformedWebhookPayloadDto payload = parseTransformedPayload.parseWebhookPayload(transformedPayload);
-                    FinalWebhookPayloadDto finalPayload = finalWebhookPayloadMapper.buildFinalPayload(payload, delivery);
-                    boolean published = publishToWebhook.publishToSolace(finalPayload, eventId, topic);
-                    handleResult(delivery, published, finalPayload, "Webhook");
+        ],
+        "creditorTransactionInfo": "paymentContract.creditors",
+        "creditorType": "BOTH",
+        "splitProvided": "true",
+        "contractAttributes": "paymentContract.paymentContractAttributes",
+        "creditorTxnInfo": {
+            "fragmentPlatformRefNo": "fragmentPlatformRefId",
+            "partyDetails": {
+                "dealRefId": "participant.dealRefId",
+                "partyRefId": "participant.partyRefId",
+                "beneficiaryCountry": "participant.accountCountry",
+                "beneficiaryCurrency": "participant.accountCurrency",
+                "beneficiaryAccountKey": "participant.accountKey",
+                "to": "participant.accountNumber"
+            },
+            "accountDetails": {
+                "paymentInstrumentId": "transactionAttributes.paymentInstrument",
+                "paymentDetails": {
+                    "accountType": "account.accountType",
+                    "proxyType": "account.proxyType",
+                    "to": "account.accountNumber",
+                    "intermediaryBankBic": "account.intermediaryBankBic",
+                    "beneficiaryBankBic": "account.accountBankBic",
+                    "beneficiaryName": "account.accountName",
+                    "beneficiaryAddressLine1": "account.accountAddressLine1",
+                    "beneficiaryAddressLine2": "account.accountAddressLine2",
+                    "beneficiaryCountry": "account.accountCountry",
+                    "beneficiaryCurrency": "account.accountCurrency",
+                    "beneficiaryAccountKey": "account.beneficiaryAccountKey",
+                    "beneficiaryBankCode": "account.beneficiaryBankCode",
+                    "beneficiaryBankBranchCode": "account.beneficiaryBankBranchCode",
+                    "transactionChargesBearedBy": "account.transactionChargesBearedBy",
+                    "debitRemittanceInformation": "account.debitRemittanceInformation",
+                    "creditRemittanceInformation": "account.creditRemittanceInformation",
+                    "additionalInformation": "account.additionalInformation",
+                    "senderPopCode": "account.senderPopCode",
+                    "receiverPopCode": "account.receiverPopCode",
+                    "bankToBankInfoLine1Indicator": "account.bankToBankInfoLine1Indicator",
+                    "bankToBankInfoLine1Description": "account.bankToBankInfoLine1Description",
+                    "bankToBankInfoLine2Indicator": "account.bankToBankInfoLine2Indicator",
+                    "bankToBankInfoLine2Description": "account.bankToBankInfoLine2Description",
+                    "bankToBankInfoLine3Indicator": "account.bankToBankInfoLine3Indicator",
+                    "bankToBankInfoLine3Description": "account.bankToBankInfoLine3Description",
+                    "bankToBankInfoLine4Indicator": "account.bankToBankInfoLine4Indicator",
+                    "bankToBankInfoLine4Description": "account.bankToBankInfoLine4Description",
+                    "bankToBankInfoLine5Indicator": "account.bankToBankInfoLine5Indicator",
+                    "bankToBankInfoLine5Description": "account.bankToBankInfoLine5Description",
+                    "bankToBankInfoLine6Indicator": "account.bankToBankInfoLine6Indicator",
+                    "bankToBankInfoLine6Description": "account.bankToBankInfoLine6Description",
+                    "ultimateDebtorName": "account.ultimateDebtorName",
+                    "ultimateDebtorAddress1": "account.ultimateDebtorAddress1",
+                    "ultimateDebtorAddress2": "account.ultimateDebtorAddress2",
+                    "ultimateDebtorCountry": "account.ultimateDebtorCountry",
+                    "ultimateCreditorName": "account.ultimateCreditorName",
+                    "ultimateCreditorAddress1": "account.ultimateCreditorAddress1",
+                    "ultimateCreditorAddress2": "account.ultimateCreditorAddress2",
+                    "ultimateCreditorCountry": "account.ultimateCreditorCountry",
+                    "paymentType": "transactionAttributes.paymentType",
+                    "beneficiaryCountryOfIncorporation": "account.countryOfIncorporation"
                 }
-
-            } else {
-                log.error("Failed to send Notification for eventId: {}", eventId);
-                retryHandler.handleFailure(delivery);
-            }
-
-        } catch (Exception e) {
-            log.error("ALERT TO PSS:- Failed to process notification: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to send Notification", e);
-        }
+            },
+            "amount": "fragmentAmtInDebitAcctCurr",
+            "instructedAmount": "instructedAmount",
+            "equivalentAmount": "equivalentAmount",
+            "instructedCurrency": "instructedCurrency",
+            "equivalentCurrency": "equivalentCurrency",
+            "rate": "fxInfo.fxRate",
+            "contractId": "fxInfo.booking.contractId",
+            "ucDealRefId": "ultimateCreditor.dealRefId",
+            "ucPartyRefId": "ultimateCreditor.ucPartyRefId",
+            "ucName": "ultimateCreditor.ultimateCreditorInfo.ucName",
+            "ucAddressLine1": "ultimateCreditor.ultimateCreditorInfo.ucAddressLine1",
+            "ucAddressLine2": "ultimateCreditor.ultimateCreditorInfo.ucAddressLine2",
+            "ucCountry": "ultimateCreditor.ultimateCreditorInfo.ucCountry",
+            "requestedExecutionOn": "requestedExecutionOn",
+            "paymentPreferences": "paymentPreferences"
+        },
+        "pastDatePolicy": {
+            "enabled": true,
+            "referToOps": true
+        },
+        "referToOps": "ACCOUNT_DETAILS_SENT",
+        "offerTo": "offerTo",
+        "createWorkItem": "createWorkItem"
     }
-
-    private void handleResult(ConnectNotificationDelivery delivery, boolean published, Object payload, String type) {
-        if (published) {
-            log.info("{} Notification sent successfully for delivery ID: {}", type, delivery.getId());
-
-            connectNotificationDeliveryRepository.updateStatusById(delivery.getId(), DeliveryStatus.SENT.toString());
-
-            saveFinalPayloadUtil.saveFinalPayload(delivery, payload, type);
-
-        } else {
-            log.error("Failed to send {} Notification delivery ID: {}", type, delivery.getId());
-            retryHandler.handleFailure(delivery);
-        }
-    }
-
-}
-package com.scb.scroeconnect.solaceworker.util;
-
-import com.scb.scroeconnect.solaceworker.entity.ConnectNotificationDelivery;
-import com.scb.scroeconnect.solaceworker.entity.ConnectSolaceWorker;
-import com.scb.scroeconnect.solaceworker.entity.NotificationEvent;
-import com.scb.scroeconnect.solaceworker.repository.ConnectNotificationEventRepository;
-import com.scb.scroeconnect.solaceworker.repository.ConnectSolaceWorkerRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-import tools.jackson.databind.ObjectMapper;
-
-import java.time.ZonedDateTime;
-
-@Component
-public class SaveFinalPayloadUtil
-{
-        @Autowired
-        ConnectNotificationEventRepository connectNotificationEventRepository;
-
-        @Autowired
-        ConnectSolaceWorkerRepository connectSolaceWorkerRepository;
-
-        private static final ObjectMapper mapper = new ObjectMapper();
-
-    public void saveFinalPayload(ConnectNotificationDelivery delivery, Object finalPayload, String deliveryMode) throws RuntimeException {
-        NotificationEvent notificationEvent = connectNotificationEventRepository
-                .findByEventId(delivery.getNotificationEvent().getEventId())
-                .orElseThrow(() -> new RuntimeException("ALERT TO PSS, Event not found for ID: " + delivery.getNotificationEvent().getEventId()));
-
-        // Create and populate the ConnectNotificationEmailInfo entity
-        ConnectSolaceWorker connectSolaceWorker = new ConnectSolaceWorker();
-        connectSolaceWorker.setDeliveryMode(deliveryMode);
-        connectSolaceWorker.setNotificationEvent(notificationEvent);
-        connectSolaceWorker.setFinalPayload(mapper.valueToTree(finalPayload));
-        connectSolaceWorker.setSendAt(ZonedDateTime.now());
-        connectSolaceWorker.setNotificationDelivery(delivery);
-
-        // Save the entity
-        connectSolaceWorkerRepository.save(connectSolaceWorker);
-    }
-
-}
+}'::json::json, 'CDG-Trial V3 Schedule Payment', 'SCHD-PAY', 'SUCCESSPATH', true, '2021-01-25 03:00:00.000', '2021-01-25 03:00:00.000');
+ 
+ 
+ 
+But when I tried adding the value with SCHD-PAY in connect_block table I got that block_function column already has a value SCHD-PAY but it's block_id is different:
+ 
+ 
+We need value with block_id as SCHD-PAY, so is possible to do any changes in the below value for SCHD-PAY?
+ 
+INSERT INTO scvprd.connect_block
+(block_id, block_name, block_policy_template, block_function, block_description, block_tag, created_date, updated_date, block_input_spec_template, block_output_spec_template)
+VALUES('SCHD-PAY', 'SCHD-PAY', NULL, 'SCHD-PAY', 'SCHD-PAY', 'scroe', '2025-07-22 01:43:08.269', '2025-07-22 01:43:08.269', NULL, NULL);
+ 
+retain same block
+ 
+change in node
+ Meaning?????????
