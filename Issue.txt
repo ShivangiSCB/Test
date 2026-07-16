@@ -1,164 +1,41 @@
-Hello Hi, for the below connect_node query I am getting the error as:
- 
-INSERT INTO scvprd.connect_node (node_id, node_name, node_policy, node_description, block_id, node_status, is_valid, created_date, updated_date) VALUES('CDG_T_V3_SCHEDULE_PAYMENT_CONTRACT', 'CDG-Trial V3 Schedule Payment via contract', '{
-    "policy": {
-        "category": "category",
-        "dealRefId": "dealRefId",
-        "initiatingParty": "paymentContract.debtor.paymentInfo.partyRefId",
-        "username": "botUserName",
-        "contractDate": "paymentContract.paymentContractDate",
-        "ultimateDebtor": {
-            "dealRefId": "paymentContract.debtor.ultimateDebtor.dealRefId",
-            "partyRefId": "paymentContract.debtor.ultimateDebtor.oboPartyRefId",
-            "name": "paymentContract.debtor.ultimateDebtor.oboInfo.oboName",
-            "country": "paymentContract.debtor.ultimateDebtor.oboInfo.oboCountry",
-            "addressLine1": "paymentContract.debtor.ultimateDebtor.oboInfo.oboAddressLine1",
-            "addressLine2": "paymentContract.debtor.ultimateDebtor.oboInfo.oboAddressLine2"
-        },
-        "paymentInfo": {
-            "partyRefId": "paymentContract.debtor.paymentInfo.partyRefId",
-            "currency": "paymentContract.debtor.paymentInfo.accountCurrency",
-            "country": "paymentContract.debtor.paymentInfo.accountCountry",
-            "amount": "paymentContract.debtor.paymentInfo.paymentContractAmount",
-            "instructedControlSum": "paymentContract.debtor.paymentInfo.instructedControlSum",
-            "equivalentControlSum": "paymentContract.debtor.paymentInfo.equivalentControlSum",
-            "platformRefNo": "platformRefId",
-            "charges": "from.charges",
-            "accountNumber": "paymentContract.debtor.paymentInfo.accountNumber",
-            "virtualAccountNumber": "virtualAccountNumber"
-        },
-        "dynamicAttributes": [
-            {
-                "label": "virtualAccountNumber",
-                "value": "virtualAccountNumber"
-            },
-            {
-                "label": "ultimateDebtor",
-                "value": "paymentContract.debtor.ultimateDebtor"
-            },
-            {
-                "label": "debtorOboDealRefId",
-                "value": "paymentContract.debtor.ultimateDebtor.dealRefId"
-            },
-            {
-                "label": "participantId",
-                "value": "paymentContract.debtor.ultimateDebtor.oboPartyRefId"
-            },
-            {
-                "label": "debtorOboName",
-                "value": "paymentContract.debtor.ultimateDebtor.oboInfo.oboName"
-            },
-            {
-                "label": "debtorOboCountry",
-                "value": "paymentContract.debtor.ultimateDebtor.oboInfo.oboCountry"
-            },
-            {
-                "label": "debtorOboAddressLine1",
-                "value": "paymentContract.debtor.ultimateDebtor.oboInfo.oboAddressLine1"
-            },
-            {
-                "label": "debtorOboAddressLine2",
-                "value": "paymentContract.debtor.ultimateDebtor.oboInfo.oboAddressLine2"
-            }
-        ],
-        "creditorTransactionInfo": "paymentContract.creditors",
-        "creditorType": "BOTH",
-        "splitProvided": "true",
-        "contractAttributes": "paymentContract.paymentContractAttributes",
-        "creditorTxnInfo": {
-            "fragmentPlatformRefNo": "fragmentPlatformRefId",
-            "partyDetails": {
-                "dealRefId": "participant.dealRefId",
-                "partyRefId": "participant.partyRefId",
-                "beneficiaryCountry": "participant.accountCountry",
-                "beneficiaryCurrency": "participant.accountCurrency",
-                "beneficiaryAccountKey": "participant.accountKey",
-                "to": "participant.accountNumber"
-            },
-            "accountDetails": {
-                "paymentInstrumentId": "transactionAttributes.paymentInstrument",
-                "paymentDetails": {
-                    "accountType": "account.accountType",
-                    "proxyType": "account.proxyType",
-                    "to": "account.accountNumber",
-                    "intermediaryBankBic": "account.intermediaryBankBic",
-                    "beneficiaryBankBic": "account.accountBankBic",
-                    "beneficiaryName": "account.accountName",
-                    "beneficiaryAddressLine1": "account.accountAddressLine1",
-                    "beneficiaryAddressLine2": "account.accountAddressLine2",
-                    "beneficiaryCountry": "account.accountCountry",
-                    "beneficiaryCurrency": "account.accountCurrency",
-                    "beneficiaryAccountKey": "account.beneficiaryAccountKey",
-                    "beneficiaryBankCode": "account.beneficiaryBankCode",
-                    "beneficiaryBankBranchCode": "account.beneficiaryBankBranchCode",
-                    "transactionChargesBearedBy": "account.transactionChargesBearedBy",
-                    "debitRemittanceInformation": "account.debitRemittanceInformation",
-                    "creditRemittanceInformation": "account.creditRemittanceInformation",
-                    "additionalInformation": "account.additionalInformation",
-                    "senderPopCode": "account.senderPopCode",
-                    "receiverPopCode": "account.receiverPopCode",
-                    "bankToBankInfoLine1Indicator": "account.bankToBankInfoLine1Indicator",
-                    "bankToBankInfoLine1Description": "account.bankToBankInfoLine1Description",
-                    "bankToBankInfoLine2Indicator": "account.bankToBankInfoLine2Indicator",
-                    "bankToBankInfoLine2Description": "account.bankToBankInfoLine2Description",
-                    "bankToBankInfoLine3Indicator": "account.bankToBankInfoLine3Indicator",
-                    "bankToBankInfoLine3Description": "account.bankToBankInfoLine3Description",
-                    "bankToBankInfoLine4Indicator": "account.bankToBankInfoLine4Indicator",
-                    "bankToBankInfoLine4Description": "account.bankToBankInfoLine4Description",
-                    "bankToBankInfoLine5Indicator": "account.bankToBankInfoLine5Indicator",
-                    "bankToBankInfoLine5Description": "account.bankToBankInfoLine5Description",
-                    "bankToBankInfoLine6Indicator": "account.bankToBankInfoLine6Indicator",
-                    "bankToBankInfoLine6Description": "account.bankToBankInfoLine6Description",
-                    "ultimateDebtorName": "account.ultimateDebtorName",
-                    "ultimateDebtorAddress1": "account.ultimateDebtorAddress1",
-                    "ultimateDebtorAddress2": "account.ultimateDebtorAddress2",
-                    "ultimateDebtorCountry": "account.ultimateDebtorCountry",
-                    "ultimateCreditorName": "account.ultimateCreditorName",
-                    "ultimateCreditorAddress1": "account.ultimateCreditorAddress1",
-                    "ultimateCreditorAddress2": "account.ultimateCreditorAddress2",
-                    "ultimateCreditorCountry": "account.ultimateCreditorCountry",
-                    "paymentType": "transactionAttributes.paymentType",
-                    "beneficiaryCountryOfIncorporation": "account.countryOfIncorporation"
-                }
-            },
-            "amount": "fragmentAmtInDebitAcctCurr",
-            "instructedAmount": "instructedAmount",
-            "equivalentAmount": "equivalentAmount",
-            "instructedCurrency": "instructedCurrency",
-            "equivalentCurrency": "equivalentCurrency",
-            "rate": "fxInfo.fxRate",
-            "contractId": "fxInfo.booking.contractId",
-            "ucDealRefId": "ultimateCreditor.dealRefId",
-            "ucPartyRefId": "ultimateCreditor.ucPartyRefId",
-            "ucName": "ultimateCreditor.ultimateCreditorInfo.ucName",
-            "ucAddressLine1": "ultimateCreditor.ultimateCreditorInfo.ucAddressLine1",
-            "ucAddressLine2": "ultimateCreditor.ultimateCreditorInfo.ucAddressLine2",
-            "ucCountry": "ultimateCreditor.ultimateCreditorInfo.ucCountry",
-            "requestedExecutionOn": "requestedExecutionOn",
-            "paymentPreferences": "paymentPreferences"
-        },
-        "pastDatePolicy": {
-            "enabled": true,
-            "referToOps": true
-        },
-        "referToOps": "ACCOUNT_DETAILS_SENT",
-        "offerTo": "offerTo",
-        "createWorkItem": "createWorkItem"
+For the below API there are combinations and if anymore combinations add that also below is my api requirement then give code according to that:
+
+API requirement:
+Parameter	Type	Required	Description
+clientId	string	Optional	Filter by Client ID
+dealId	string	Optional	Filter by Deal ID
+patternType	string	Optional	Filter by pattern type
+page	integer	Optional	Page number (default: 1)
+pageSize	integer	Optional	Records per page (default: 10)[KM1.1]
+Max default size per page: 20
+
+
+clientId	dealId	patternType	ExpectedResult
+yes	no	no	All records for that clientId
+no	yes	no	All records for that dealId
+no	no	yes	All records for that patternType
+yes	yes	yes	Records matching that clientId, dealId, and patternType
+yes	yes	no	Records matching that clientId and dealId
+no	yes	yes	Records matching that dealId and patternType
+yes	no	yes	Records matching that clientId and patternType
+no	no	no	All records
+
+
+    @Override
+    public SubledgerPatternResponse getPattern(String clientId, String dealId, String patternType, Integer page, Integer pageSize) {
+        logger.info("Retrieving subledger patterns for clientId={}, dealId={}, patternType={}, page={}, pageSize={}", clientId, dealId, patternType, page, pageSize);
+        Pageable pageable = patternPageService.createPageable(page, pageSize);
+
+        Page<SubledgerPatternEntity> pageResult;
+        if (patternType != null && !patternType.isBlank()) {
+            pageResult = subledgerPatternRepository.findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
+                    clientId,
+                    dealId,
+                    patternType.trim().toUpperCase(),
+                    pageable);
+        } else {
+            pageResult = subledgerPatternRepository.findAllByClientIdAndDealIdAndDeleteFlagFalse(clientId, dealId, pageable);
+        }
+
+        return buildResponse(pageResult);
     }
-}'::json::json, 'CDG-Trial V3 Schedule Payment', 'SCHD-PAY', 'SUCCESSPATH', true, '2021-01-25 03:00:00.000', '2021-01-25 03:00:00.000');
- 
- 
- 
-But when I tried adding the value with SCHD-PAY in connect_block table I got that block_function column already has a value SCHD-PAY but it's block_id is different:
- 
- 
-We need value with block_id as SCHD-PAY, so is possible to do any changes in the below value for SCHD-PAY?
- 
-INSERT INTO scvprd.connect_block
-(block_id, block_name, block_policy_template, block_function, block_description, block_tag, created_date, updated_date, block_input_spec_template, block_output_spec_template)
-VALUES('SCHD-PAY', 'SCHD-PAY', NULL, 'SCHD-PAY', 'SCHD-PAY', 'scroe', '2025-07-22 01:43:08.269', '2025-07-22 01:43:08.269', NULL, NULL);
- 
-retain same block
- 
-change in node
- Meaning?????????
