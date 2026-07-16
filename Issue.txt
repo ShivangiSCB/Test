@@ -1,41 +1,337 @@
-For the below API there are combinations and if anymore combinations add that also below is my api requirement then give code according to that:
+Create testcases for the below files:
 
-API requirement:
-Parameter	Type	Required	Description
-clientId	string	Optional	Filter by Client ID
-dealId	string	Optional	Filter by Deal ID
-patternType	string	Optional	Filter by pattern type
-page	integer	Optional	Page number (default: 1)
-pageSize	integer	Optional	Records per page (default: 10)[KM1.1]
-Max default size per page: 20
+package com.sc.scroe.pattern.specification;
+
+import jakarta.persistence.criteria.Predicate;
+import org.springframework.data.jpa.domain.Specification;
+
+import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class SubledgerPatternSpecification {
+
+    public static Specification<SubledgerPatternEntity> filterBy(
+            String clientId,
+            String dealId,
+            String patternType) {
+
+        return (root, query, cb) -> {
+
+            List<Predicate> predicates = new ArrayList<>();
+
+            // Always fetch only non-deleted records
+            predicates.add(cb.isFalse(root.get("deleteFlag")));
+
+            if (clientId != null && !clientId.isBlank()) {
+                predicates.add(cb.equal(root.get("clientId"), clientId.trim()));
+            }
+
+            if (dealId != null && !dealId.isBlank()) {
+                predicates.add(cb.equal(root.get("dealId"), dealId.trim()));
+            }
+
+            if (patternType != null && !patternType.isBlank()) {
+                predicates.add(cb.equal(
+                        cb.upper(root.get("patternType")),
+                        patternType.trim().toUpperCase()));
+            }
+
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+    }
+}
+package com.sc.scroe.pattern.util;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+
+import com.sc.scroe.pattern.constant.PatternConstants;
+import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
+import com.sc.scroe.pattern.repository.SubledgerPatternRepository;
+import com.sc.scroe.pattern.request.SubledgerPatternPostRequest;
+import com.sc.scroe.pattern.response.SubledgerPatternResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class SubledgerPatternUtil {
+
+    private static final Logger logger = LoggerFactory.getLogger(SubledgerPatternUtil.class);
 
 
-clientId	dealId	patternType	ExpectedResult
-yes	no	no	All records for that clientId
-no	yes	no	All records for that dealId
-no	no	yes	All records for that patternType
-yes	yes	yes	Records matching that clientId, dealId, and patternType
-yes	yes	no	Records matching that clientId and dealId
-no	yes	yes	Records matching that dealId and patternType
-yes	no	yes	Records matching that clientId and patternType
-no	no	no	All records
+    @Autowired
+    SubledgerPatternRepository subledgerPatternRepository;
 
+     public SubledgerPatternResponse buildResponse(Page<SubledgerPatternEntity> pageResult) {
+        SubledgerPatternResponse response = new SubledgerPatternResponse();
+        response.setPage(pageResult.getNumber() + 1);
+        response.setPageCount(pageResult.getTotalPages());
+        response.setTotalCount(pageResult.getTotalElements());
+        response.setData(pageResult.getContent());
+        return response;
+    }
+
+    public void validatePatternType(String patternType) {
+        if (!PatternConstants.PatternType.isValid(patternType)) {
+            logger.warn("Invalid patternType received: {}", patternType);
+            throw new IllegalArgumentException("patternType must be one of: SUBACCOUNT, VA, HYBRID");
+        }
+    }
+
+    public void validatePatternfields(String clientId, String dealId, String patternType) {
+        SubledgerPatternEntity findfirst = subledgerPatternRepository
+                .findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(clientId, dealId, patternType, null)
+                .stream().findFirst().orElse(null);
+        if (findfirst != null) {
+            logger.warn("Subledger pattern with clientId={}, dealId={}, patternType={} already exists", clientId,
+                    dealId, patternType);
+            throw new IllegalArgumentException(
+                    "Subledger pattern with the same clientId, dealId, and patternType already exists.");
+        }
+    }
+
+    public void mapRequestToEntity(SubledgerPatternPostRequest request, SubledgerPatternEntity entity) {
+        entity.setClientId(request.getClientId());
+        entity.setDealId(request.getDealId());
+        entity.setPatternType(request.getPatternType().trim().toUpperCase());
+    }
+
+}
+package com.sc.scroe.pattern.service;
+
+import com.sc.scroe.pattern.constant.PatternConstants;
+import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
+import com.sc.scroe.pattern.repository.SubledgerPatternRepository;
+import com.sc.scroe.pattern.request.SubledgerPatternPostRequest;
+import com.sc.scroe.pattern.response.SubledgerPatternResponse;
+import com.sc.scroe.pattern.service.PageService.PatternPageService;
+import com.sc.scroe.pattern.specification.SubledgerPatternSpecification;
+import com.sc.scroe.pattern.util.SubledgerPatternUtil;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class SubledgerPatternServiceImpl implements SubledgerPatternService {
+
+    private static final Logger logger = LoggerFactory.getLogger(SubledgerPatternServiceImpl.class);
+
+    @Autowired
+    SubledgerPatternRepository subledgerPatternRepository;
+
+    @Autowired
+    PatternPageService patternPageService;
+
+    @Autowired
+    SubledgerPatternUtil subledgerPatternUtil;
 
     @Override
     public SubledgerPatternResponse getPattern(String clientId, String dealId, String patternType, Integer page, Integer pageSize) {
-        logger.info("Retrieving subledger patterns for clientId={}, dealId={}, patternType={}, page={}, pageSize={}", clientId, dealId, patternType, page, pageSize);
+        // logger.info("Retrieving subledger patterns for clientId={}, dealId={},
+        // patternType={}, page={}, pageSize={}", clientId, dealId, patternType, page,
+        // pageSize);
+        // Pageable pageable = patternPageService.createPageable(page, pageSize);
+
+        // Page<SubledgerPatternEntity> pageResult;
+        // if (patternType != null && !patternType.isBlank()) {
+        // pageResult =
+        // subledgerPatternRepository.findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
+        // clientId,
+        // dealId,
+        // patternType.trim().toUpperCase(),
+        // pageable);
+        // } else {
+        // pageResult =
+        // subledgerPatternRepository.findAllByClientIdAndDealIdAndDeleteFlagFalse(clientId,
+        // dealId, pageable);
+        // }
+
+        // return buildResponse(pageResult);
+
+        logger.info("Retrieving subledger patterns for clientId={}, dealId={}, patternType={}, page={}, pageSize={}",
+                clientId, dealId, patternType, page, pageSize);
+
         Pageable pageable = patternPageService.createPageable(page, pageSize);
 
-        Page<SubledgerPatternEntity> pageResult;
-        if (patternType != null && !patternType.isBlank()) {
-            pageResult = subledgerPatternRepository.findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
-                    clientId,
-                    dealId,
-                    patternType.trim().toUpperCase(),
-                    pageable);
-        } else {
-            pageResult = subledgerPatternRepository.findAllByClientIdAndDealIdAndDeleteFlagFalse(clientId, dealId, pageable);
-        }
+        Specification<SubledgerPatternEntity> specification = SubledgerPatternSpecification.filterBy(
+                clientId,
+                dealId,
+                patternType);
 
-        return buildResponse(pageResult);
+        Page<SubledgerPatternEntity> pageResult = subledgerPatternRepository.findAll(specification, pageable);
+
+        return subledgerPatternUtil.buildResponse(pageResult);
     }
+
+    @Transactional
+    @Override
+    public Long createPattern(SubledgerPatternPostRequest request) {
+        logger.info("Creating pattern with clientId={}, dealId={}, patternType={}", request.getClientId(),
+                request.getDealId(), request.getPatternType());
+        subledgerPatternUtil.validatePatternType(request.getPatternType());
+        subledgerPatternUtil.validatePatternfields(request.getClientId(), request.getDealId(), request.getPatternType());
+        SubledgerPatternEntity entity = new SubledgerPatternEntity();
+        subledgerPatternUtil.mapRequestToEntity(request, entity);
+        SubledgerPatternEntity savedEntity = subledgerPatternRepository.save(entity);
+        logger.info("Pattern created successfully with patternId={}", savedEntity.getPatternId());
+        return savedEntity.getPatternId();
+    }
+  
+}
+I already have testcases ready but that won't work as code is changed. Try to do 100% code coverage and line coverage for all:
+package com.sc.scroe.pattern.service;
+
+import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
+import com.sc.scroe.pattern.repository.SubledgerPatternRepository;
+import com.sc.scroe.pattern.request.SubledgerPatternPostRequest;
+import com.sc.scroe.pattern.response.SubledgerPatternResponse;
+import com.sc.scroe.pattern.service.PageService.PatternPageService;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class SubledgerPatternServiceImplTest {
+
+    @Mock
+    private SubledgerPatternRepository subledgerPatternRepository;
+
+    @Mock
+    private PatternPageService patternPageService;
+
+    @InjectMocks
+    private SubledgerPatternServiceImpl subledgerPatternService;
+
+    @Test
+    void getPatternShouldReturnPaginatedResponseWhenPatternTypeIsProvided() {
+        SubledgerPatternEntity entity = new SubledgerPatternEntity();
+        entity.setPatternId(10L);
+        entity.setClientId("CLIENT-1");
+        entity.setDealId("DEAL-1");
+        entity.setPatternType("VA");
+
+        Pageable pageable = PageRequest.of(0, 10);
+        Page<SubledgerPatternEntity> pageResult = new PageImpl<>(List.of(entity), pageable, 1);
+
+        when(patternPageService.createPageable(1, 10)).thenReturn(pageable);
+        when(subledgerPatternRepository.findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
+                "CLIENT-1", "DEAL-1", "VA", pageable)).thenReturn(pageResult);
+
+        SubledgerPatternResponse response = subledgerPatternService.getPattern("CLIENT-1", "DEAL-1", "VA", 1, 10);
+
+        assertEquals(1, response.getPage());
+        assertEquals(1, response.getPageCount());
+        assertEquals(1L, response.getTotalCount());
+        assertEquals(1, response.getData().size());
+        assertEquals(10L, response.getData().get(0).getPatternId());
+    }
+
+    @Test
+    void getPatternShouldFallbackWhenPatternTypeIsNull() {
+        Pageable pageable = PageRequest.of(0, 10);
+        Page<SubledgerPatternEntity> pageResult = new PageImpl<>(List.of(), pageable, 0);
+
+        when(patternPageService.createPageable(1, 10)).thenReturn(pageable);
+        when(subledgerPatternRepository.findAllByClientIdAndDealIdAndDeleteFlagFalse(
+                "CLIENT-1", "DEAL-1", pageable)).thenReturn(pageResult);
+
+        SubledgerPatternResponse response = subledgerPatternService.getPattern("CLIENT-1", "DEAL-1", null, 1, 10);
+
+        assertEquals(1, response.getPage());
+        assertEquals(0, response.getPageCount());
+        assertEquals(0L, response.getTotalCount());
+    }
+
+    @Test
+    void getPatternShouldFallbackWhenPatternTypeIsBlank() {
+        Pageable pageable = PageRequest.of(0, 10);
+        Page<SubledgerPatternEntity> pageResult = new PageImpl<>(List.of(), pageable, 0);
+
+        when(patternPageService.createPageable(1, 10)).thenReturn(pageable);
+        when(subledgerPatternRepository.findAllByClientIdAndDealIdAndDeleteFlagFalse(
+                "CLIENT-1", "DEAL-1", pageable)).thenReturn(pageResult);
+
+        SubledgerPatternResponse response = subledgerPatternService.getPattern("CLIENT-1", "DEAL-1", "   ", 1, 10);
+
+        assertEquals(1, response.getPage());
+        assertEquals(0, response.getPageCount());
+        assertEquals(0L, response.getTotalCount());
+    }
+
+    @Test
+    void createPatternShouldPersistWhenPatternTypeIsValidAndUnique() {
+        SubledgerPatternPostRequest request = new SubledgerPatternPostRequest();
+        request.setClientId("CLIENT-1");
+        request.setDealId("DEAL-1");
+        request.setPatternType("VA");
+
+        Pageable nullPageable = null;
+        when(subledgerPatternRepository.findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
+                "CLIENT-1", "DEAL-1", "VA", nullPageable)).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 1), 0));
+
+        SubledgerPatternEntity savedEntity = new SubledgerPatternEntity();
+        savedEntity.setPatternId(77L);
+        when(subledgerPatternRepository.save(any(SubledgerPatternEntity.class))).thenReturn(savedEntity);
+
+        Long patternId = subledgerPatternService.createPattern(request);
+
+        assertEquals(77L, patternId);
+        verify(subledgerPatternRepository).save(any(SubledgerPatternEntity.class));
+    }
+
+    @Test
+    void createPatternShouldRejectUnsupportedPatternType() {
+        SubledgerPatternPostRequest request = new SubledgerPatternPostRequest();
+        request.setClientId("CLIENT-1");
+        request.setDealId("DEAL-1");
+        request.setPatternType("INVALID");
+
+        assertThrows(IllegalArgumentException.class, () -> subledgerPatternService.createPattern(request));
+        verify(subledgerPatternRepository, never()).save(any(SubledgerPatternEntity.class));
+    }
+
+    @Test
+    void createPatternShouldRejectDuplicatePattern() {
+        SubledgerPatternPostRequest request = new SubledgerPatternPostRequest();
+        request.setClientId("CLIENT-1");
+        request.setDealId("DEAL-1");
+        request.setPatternType("VA");
+
+        SubledgerPatternEntity existingEntity = new SubledgerPatternEntity();
+        existingEntity.setPatternId(99L);
+        existingEntity.setClientId("CLIENT-1");
+        existingEntity.setDealId("DEAL-1");
+        existingEntity.setPatternType("VA");
+
+        Pageable nullPageable = null;
+        when(subledgerPatternRepository.findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
+                "CLIENT-1", "DEAL-1", "VA", nullPageable))
+                .thenReturn(new PageImpl<>(List.of(existingEntity), PageRequest.of(0, 1), 1));
+
+        assertThrows(IllegalArgumentException.class, () -> subledgerPatternService.createPattern(request));
+        verify(subledgerPatternRepository, never()).save(any(SubledgerPatternEntity.class));
+    }
+}
+
