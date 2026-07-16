@@ -335,3 +335,152 @@ class SubledgerPatternServiceImplTest {
     }
 }
 
+With the files you want:
+package com.sc.scroe.pattern.entity;
+
+//import com.sc.scroe.shared.entity.AuditableSoftDeleteEntity;
+import jakarta.persistence.*;
+import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
+
+import java.math.BigInteger;
+import java.time.LocalDateTime;
+
+@Data
+@Entity
+@Table(name = "subledger_pattern")
+@Getter
+@Setter
+public class SubledgerPatternEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "pattern_id")
+    private Long patternId;
+
+    @Column(name = "client_id", nullable = false, length = 100)
+    private String clientId;
+
+    @Column(name = "deal_id", nullable = false, length = 100)
+    private String dealId; //CHeck in other services, partyRefId column to be checked
+
+    @Column(name = "pattern_type", nullable = false, length = 20)
+    private String patternType;
+
+    @Column(name = "delete_flag", nullable = false)
+    private boolean deleteFlag = false;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        LocalDateTime now = LocalDateTime.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
+    }
+}
+
+package com.sc.scroe.pattern.constant;
+
+public class PatternConstants {
+
+    public enum PatternType {
+
+        SUBACCOUNT("SUBACCOUNT"),
+        VA("VA"),
+        HYBRID("HYBRID");
+
+        private final String value;
+
+        PatternType(String value) {
+            this.value = value;
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        public static boolean isValid(String value) {
+            if (value == null) {
+                return false;
+            }
+
+            String trimmedValue = value.trim();
+            for (PatternType patternType : values()) {
+                if (patternType.getValue().equalsIgnoreCase(trimmedValue)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+}
+package com.sc.scroe.pattern.response;
+
+import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.List;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class SubledgerPatternResponse {
+    private Integer page;
+    private Integer pageCount;
+    private Long totalCount;
+    private List<SubledgerPatternEntity> data;
+}
+package com.sc.scroe.pattern.repository;
+
+import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+
+public interface SubledgerPatternRepository extends JpaRepository<SubledgerPatternEntity, String>, JpaSpecificationExecutor<SubledgerPatternEntity> {
+
+    Page<SubledgerPatternEntity> findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
+            String clientId,
+            String dealId,
+            String patternType,
+            Pageable pageable);
+
+    Page<SubledgerPatternEntity> findAllByClientIdAndDealIdAndDeleteFlagFalse(
+            String clientId,
+            String dealId,
+            Pageable pageable);
+
+    Page<SubledgerPatternEntity> findAllByDeleteFlagFalse(Pageable pageable);
+
+}
+package com.sc.scroe.pattern.service.PageService;
+
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Pageable;
+
+@Service
+public class PatternPageService {
+
+        public Pageable createPageable(Integer page, Integer pageSize) {
+        int safePage = page == null || page < 1 ? 0 : page - 1;
+        int safePageSize = pageSize == null || pageSize < 1 ? 10 : Math.min(pageSize, 20);
+        return PageRequest.of(safePage, safePageSize);
+    }
+
+}
