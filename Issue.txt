@@ -1,341 +1,165 @@
-Create testcases for the below files:
+Requirement:
+POST API for subledger_masteraccount table:
+URL: /v1/subledger/masteraccounts
 
-package com.sc.scroe.pattern.specification;
-
-import jakarta.persistence.criteria.Predicate;
-import org.springframework.data.jpa.domain.Specification;
-
-import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
-
-import java.util.ArrayList;
-import java.util.List;
-
-public class SubledgerPatternSpecification {
-
-    public static Specification<SubledgerPatternEntity> filterBy(
-            String clientId,
-            String dealId,
-            String patternType) {
-
-        return (root, query, cb) -> {
-
-            List<Predicate> predicates = new ArrayList<>();
-
-            // Always fetch only non-deleted records
-            predicates.add(cb.isFalse(root.get("deleteFlag")));
-
-            if (clientId != null && !clientId.isBlank()) {
-                predicates.add(cb.equal(root.get("clientId"), clientId.trim()));
-            }
-
-            if (dealId != null && !dealId.isBlank()) {
-                predicates.add(cb.equal(root.get("dealId"), dealId.trim()));
-            }
-
-            if (patternType != null && !patternType.isBlank()) {
-                predicates.add(cb.equal(
-                        cb.upper(root.get("patternType")),
-                        patternType.trim().toUpperCase()));
-            }
-
-            return cb.and(predicates.toArray(new Predicate[0]));
-        };
+Request:
+{
+    "dealId": "DEAL-20260703-001",
+     “clientId": "CLIENT001",
+  "masterAccountNumber": "1234567890",
+    "masterAccountCountry": "GB",
+  "masterAccountCurrencyCode": "GBP",
+  "masterAccountName": "ABC Corporation",
+ "companyInitial": "SCBDD",
+    "clientType": "IH",
+    "subAccountType": "Savings",  - Manual input
+    "productCode": "601,
+    "accountClassificationCode": "232053”,
+    "subKycCddFlag": "Y",
+    "subKycCddRiskCode": "ABC",      --single value only possible (Changed in master setup table from multi value selected to single value 
+    "subDefaultRiskCodeHoldFlag": "Y",
+    "subDefaultRiskCode": ["HOLD01","HOLD02"]  - comma separated value stored in DB
+    "masterAccountAddressInheritFlag": "Y",
+    "clientsMoney": "Y",
+    “infoCodeClientsMoney[KM2.1]”:””,
+    "subAccountClosureOffset": "Y",
+    [KM3.1]"miscInfos": [
+                {
+                    "infoCode1": "SCR",
+                    "infoValue1": "N"
+                },
+                {
+                    "infoCode2": "WSC",
+                    "infoValue2": "00"
+                }
+            ],   
+    "accountBranch": "066",
+    "consolidatedStatementFlag": "Y",
+    "glid": "9999999999",
+    "masterNumber": "3094154",
+    "accountCategory": "C",
+    "dsrClosingId": "DSR001",
+    "adviseInterestIndicator": "3",
+    "ibanNumber": "GB29NWBK60161331926819",
+    "closeDate": "2027-12-31",   //YYYY-MM-DD
+    "subProductCode": "DD",
+    "creditInterestCode": "00",
+    "debitInterestCode": "01",
+    "interestCode": "9999",
+    "suppressStatementFlag": "Y",
+    "creditSubAccountInterestToMasterAccount": "Y",
+    "maxSubAccountLimit": "99",
+    "openedOn": "2026-07-03", //YYYY-MM-DD
+    "ebbsAccountStatus": "A"
     }
+Field Reference:
+Field	Type	Mandatory	Notes
+dealId	string	Yes	 
+clientId	string	Yes	 
+masterAccountNumber	string	Yes	 
+masterAccountCountry	string	Yes	 
+masterAccountCurrencyCode	string	Yes	 
+masterAccountName	string	Optional	 
+companyInitial	string	Optional	 
+clientType	string	Optional	 
+subAccountType	string	Optional	Manual input
+productCode	string	Optional	
+accountClassificationCode	string	Optional	
+subKycCddFlag	string	Optional	 
+subKycCddRiskCode	string	Optional	Single value only
+subDefaultRiskCodeHoldFlag	string	Optional	 
+subDefaultRiskCode	array of strings	Optional	Multiple hold codes; stored as comma-separated in DB
+masterAccountAddressInheritFlag	string	Optional	 
+clientsMoney	string	Optional	 
+infoCodeClientsMoney	String	Optional	
+subAccountClosureOffset	string	Optional	 
+infoCode1	string	Optional	 
+infoValue1	String	Optional	
+infoCode2	string	Optional	 
+infoValue2	String	Optional	
+accountBranch	string	Optional	 
+consolidatedStatementFlag	string	Optional	 
+glid	string	Optional	 
+masterNumber	string	Yes	 
+accountCategory	string	Optional	 
+dsrClosingId	string	Optional	 
+adviseInterestIndicator	string	Optional	 
+ibanNumber	string	Optional	 
+closeDate	string (date)	Optional	YYYY-MM-DD
+subProductCode	string	Optional	 
+creditInterestCode	string	Optional	 
+debitInterestCode	string	Optional	 
+interestCode	string	Optional	 
+suppressStatementFlag	string	Optional	 
+creditSubAccountInterestToMasterAccount	string	Optional	 
+maxSubAccountLimit	string	Optional	 
+openedOn	string (date)	Optional	YYYY-MM-DD
+ebbsAccountStatus	string	Optional	 
+
+Response:
+
+JSON	Data Type	Description
+200 OK		
+{		
+"masterAccountId":"MAS001"	String	Unique reference number of master account setup table
+}		
+
+
+
+400 Error		
+{		
+   "errors":[{		
+      "code": " ERR01",	String	Error code to classify the type of error
+      "description" :"master account number already exist"	String	Description of the error
+  }]		
+}		
+404 Error		
+{		
+   "errors":[{		
+      "code": " ERR01",	String	Error code to classify the type of error
+      "description" :"Invalid input fields"	String	Description of the error
+  }]		
+}		
+500 Error		
+{		
+   "errors":[{		
+      "code": " ERR01",	String	Error code to classify the type of error
+      "description" :"Technical Issue - Please contact the support team"	String	Description of the error
+   }]		
 }
-package com.sc.scroe.pattern.util;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
+I have already created:
 
-import com.sc.scroe.pattern.constant.PatternConstants;
-import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
-import com.sc.scroe.pattern.repository.SubledgerPatternRepository;
-import com.sc.scroe.pattern.request.SubledgerPatternPostRequest;
-import com.sc.scroe.pattern.response.SubledgerPatternResponse;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-public class SubledgerPatternUtil {
-
-    private static final Logger logger = LoggerFactory.getLogger(SubledgerPatternUtil.class);
-
-
-    @Autowired
-    SubledgerPatternRepository subledgerPatternRepository;
-
-     public SubledgerPatternResponse buildResponse(Page<SubledgerPatternEntity> pageResult) {
-        SubledgerPatternResponse response = new SubledgerPatternResponse();
-        response.setPage(pageResult.getNumber() + 1);
-        response.setPageCount(pageResult.getTotalPages());
-        response.setTotalCount(pageResult.getTotalElements());
-        response.setData(pageResult.getContent());
-        return response;
+1) Controller:
+    @PostMapping(path = "/masteraccount", consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> create(@RequestBody MasterAccountPostRequest request) {
+        subledgerMasteraccountService.createMasterAccount(request);
+        return ResponseEntity.ok("SUCCESS");
     }
 
-    public void validatePatternType(String patternType) {
-        if (!PatternConstants.PatternType.isValid(patternType)) {
-            logger.warn("Invalid patternType received: {}", patternType);
-            throw new IllegalArgumentException("patternType must be one of: SUBACCOUNT, VA, HYBRID");
-        }
-    }
-
-    public void validatePatternfields(String clientId, String dealId, String patternType) {
-        SubledgerPatternEntity findfirst = subledgerPatternRepository
-                .findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(clientId, dealId, patternType, null)
-                .stream().findFirst().orElse(null);
-        if (findfirst != null) {
-            logger.warn("Subledger pattern with clientId={}, dealId={}, patternType={} already exists", clientId,
-                    dealId, patternType);
-            throw new IllegalArgumentException(
-                    "Subledger pattern with the same clientId, dealId, and patternType already exists.");
-        }
-    }
-
-    public void mapRequestToEntity(SubledgerPatternPostRequest request, SubledgerPatternEntity entity) {
-        entity.setClientId(request.getClientId());
-        entity.setDealId(request.getDealId());
-        entity.setPatternType(request.getPatternType().trim().toUpperCase());
-    }
-
-}
-package com.sc.scroe.pattern.service;
-
-import com.sc.scroe.pattern.constant.PatternConstants;
-import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
-import com.sc.scroe.pattern.repository.SubledgerPatternRepository;
-import com.sc.scroe.pattern.request.SubledgerPatternPostRequest;
-import com.sc.scroe.pattern.response.SubledgerPatternResponse;
-import com.sc.scroe.pattern.service.PageService.PatternPageService;
-import com.sc.scroe.pattern.specification.SubledgerPatternSpecification;
-import com.sc.scroe.pattern.util.SubledgerPatternUtil;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.domain.Specification;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-@Service
-public class SubledgerPatternServiceImpl implements SubledgerPatternService {
-
-    private static final Logger logger = LoggerFactory.getLogger(SubledgerPatternServiceImpl.class);
-
-    @Autowired
-    SubledgerPatternRepository subledgerPatternRepository;
-
-    @Autowired
-    PatternPageService patternPageService;
-
-    @Autowired
-    SubledgerPatternUtil subledgerPatternUtil;
-
+2) ServiceImpl
     @Override
-    public SubledgerPatternResponse getPattern(String clientId, String dealId, String patternType, Integer page, Integer pageSize) {
-        // logger.info("Retrieving subledger patterns for clientId={}, dealId={},
-        // patternType={}, page={}, pageSize={}", clientId, dealId, patternType, page,
-        // pageSize);
-        // Pageable pageable = patternPageService.createPageable(page, pageSize);
-
-        // Page<SubledgerPatternEntity> pageResult;
-        // if (patternType != null && !patternType.isBlank()) {
-        // pageResult =
-        // subledgerPatternRepository.findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
-        // clientId,
-        // dealId,
-        // patternType.trim().toUpperCase(),
-        // pageable);
-        // } else {
-        // pageResult =
-        // subledgerPatternRepository.findAllByClientIdAndDealIdAndDeleteFlagFalse(clientId,
-        // dealId, pageable);
-        // }
-
-        // return buildResponse(pageResult);
-
-        logger.info("Retrieving subledger patterns for clientId={}, dealId={}, patternType={}, page={}, pageSize={}",
-                clientId, dealId, patternType, page, pageSize);
-
-        Pageable pageable = patternPageService.createPageable(page, pageSize);
-
-        Specification<SubledgerPatternEntity> specification = SubledgerPatternSpecification.filterBy(
-                clientId,
-                dealId,
-                patternType);
-
-        Page<SubledgerPatternEntity> pageResult = subledgerPatternRepository.findAll(specification, pageable);
-
-        return subledgerPatternUtil.buildResponse(pageResult);
+    public void createMasterAccount(MasterAccountPostRequest request) {
+        SubledgerMasteraccountEntity entity = new SubledgerMasteraccountEntity();
+        mapPostRequestToEntity(request, entity);
+        subledgerMasteraccountRepository.save(entity);
     }
 
-    @Transactional
-    @Override
-    public Long createPattern(SubledgerPatternPostRequest request) {
-        logger.info("Creating pattern with clientId={}, dealId={}, patternType={}", request.getClientId(),
-                request.getDealId(), request.getPatternType());
-        subledgerPatternUtil.validatePatternType(request.getPatternType());
-        subledgerPatternUtil.validatePatternfields(request.getClientId(), request.getDealId(), request.getPatternType());
-        SubledgerPatternEntity entity = new SubledgerPatternEntity();
-        subledgerPatternUtil.mapRequestToEntity(request, entity);
-        SubledgerPatternEntity savedEntity = subledgerPatternRepository.save(entity);
-        logger.info("Pattern created successfully with patternId={}", savedEntity.getPatternId());
-        return savedEntity.getPatternId();
-    }
-  
-}
-I already have testcases ready but that won't work as code is changed. Try to do 100% code coverage and line coverage for all:
-package com.sc.scroe.pattern.service;
+3) Repository
+public interface SubledgerMasteraccountRepository extends JpaRepository<SubledgerMasteraccountEntity, Long> {
 
-import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
-import com.sc.scroe.pattern.repository.SubledgerPatternRepository;
-import com.sc.scroe.pattern.request.SubledgerPatternPostRequest;
-import com.sc.scroe.pattern.response.SubledgerPatternResponse;
-import com.sc.scroe.pattern.service.PageService.PatternPageService;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
+	Optional<SubledgerMasteraccountEntity> findFirstByDealIdAndDeleteFlagFalse(String dealId);
 
-import java.util.List;
+	Optional<SubledgerMasteraccountEntity> findFirstByDealIdAndClientIdAndDeleteFlagFalse(String dealId, String clientId);
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+	Page<SubledgerMasteraccountEntity> findByDeleteFlagFalse(Pageable pageable);
 
-@ExtendWith(MockitoExtension.class)
-class SubledgerPatternServiceImplTest {
+	Page<SubledgerMasteraccountEntity> findByDealIdAndClientIdAndDeleteFlagFalse(String dealId, String clientId, Pageable pageable);
 
-    @Mock
-    private SubledgerPatternRepository subledgerPatternRepository;
-
-    @Mock
-    private PatternPageService patternPageService;
-
-    @InjectMocks
-    private SubledgerPatternServiceImpl subledgerPatternService;
-
-    @Test
-    void getPatternShouldReturnPaginatedResponseWhenPatternTypeIsProvided() {
-        SubledgerPatternEntity entity = new SubledgerPatternEntity();
-        entity.setPatternId(10L);
-        entity.setClientId("CLIENT-1");
-        entity.setDealId("DEAL-1");
-        entity.setPatternType("VA");
-
-        Pageable pageable = PageRequest.of(0, 10);
-        Page<SubledgerPatternEntity> pageResult = new PageImpl<>(List.of(entity), pageable, 1);
-
-        when(patternPageService.createPageable(1, 10)).thenReturn(pageable);
-        when(subledgerPatternRepository.findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
-                "CLIENT-1", "DEAL-1", "VA", pageable)).thenReturn(pageResult);
-
-        SubledgerPatternResponse response = subledgerPatternService.getPattern("CLIENT-1", "DEAL-1", "VA", 1, 10);
-
-        assertEquals(1, response.getPage());
-        assertEquals(1, response.getPageCount());
-        assertEquals(1L, response.getTotalCount());
-        assertEquals(1, response.getData().size());
-        assertEquals(10L, response.getData().get(0).getPatternId());
-    }
-
-    @Test
-    void getPatternShouldFallbackWhenPatternTypeIsNull() {
-        Pageable pageable = PageRequest.of(0, 10);
-        Page<SubledgerPatternEntity> pageResult = new PageImpl<>(List.of(), pageable, 0);
-
-        when(patternPageService.createPageable(1, 10)).thenReturn(pageable);
-        when(subledgerPatternRepository.findAllByClientIdAndDealIdAndDeleteFlagFalse(
-                "CLIENT-1", "DEAL-1", pageable)).thenReturn(pageResult);
-
-        SubledgerPatternResponse response = subledgerPatternService.getPattern("CLIENT-1", "DEAL-1", null, 1, 10);
-
-        assertEquals(1, response.getPage());
-        assertEquals(0, response.getPageCount());
-        assertEquals(0L, response.getTotalCount());
-    }
-
-    @Test
-    void getPatternShouldFallbackWhenPatternTypeIsBlank() {
-        Pageable pageable = PageRequest.of(0, 10);
-        Page<SubledgerPatternEntity> pageResult = new PageImpl<>(List.of(), pageable, 0);
-
-        when(patternPageService.createPageable(1, 10)).thenReturn(pageable);
-        when(subledgerPatternRepository.findAllByClientIdAndDealIdAndDeleteFlagFalse(
-                "CLIENT-1", "DEAL-1", pageable)).thenReturn(pageResult);
-
-        SubledgerPatternResponse response = subledgerPatternService.getPattern("CLIENT-1", "DEAL-1", "   ", 1, 10);
-
-        assertEquals(1, response.getPage());
-        assertEquals(0, response.getPageCount());
-        assertEquals(0L, response.getTotalCount());
-    }
-
-    @Test
-    void createPatternShouldPersistWhenPatternTypeIsValidAndUnique() {
-        SubledgerPatternPostRequest request = new SubledgerPatternPostRequest();
-        request.setClientId("CLIENT-1");
-        request.setDealId("DEAL-1");
-        request.setPatternType("VA");
-
-        Pageable nullPageable = null;
-        when(subledgerPatternRepository.findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
-                "CLIENT-1", "DEAL-1", "VA", nullPageable)).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 1), 0));
-
-        SubledgerPatternEntity savedEntity = new SubledgerPatternEntity();
-        savedEntity.setPatternId(77L);
-        when(subledgerPatternRepository.save(any(SubledgerPatternEntity.class))).thenReturn(savedEntity);
-
-        Long patternId = subledgerPatternService.createPattern(request);
-
-        assertEquals(77L, patternId);
-        verify(subledgerPatternRepository).save(any(SubledgerPatternEntity.class));
-    }
-
-    @Test
-    void createPatternShouldRejectUnsupportedPatternType() {
-        SubledgerPatternPostRequest request = new SubledgerPatternPostRequest();
-        request.setClientId("CLIENT-1");
-        request.setDealId("DEAL-1");
-        request.setPatternType("INVALID");
-
-        assertThrows(IllegalArgumentException.class, () -> subledgerPatternService.createPattern(request));
-        verify(subledgerPatternRepository, never()).save(any(SubledgerPatternEntity.class));
-    }
-
-    @Test
-    void createPatternShouldRejectDuplicatePattern() {
-        SubledgerPatternPostRequest request = new SubledgerPatternPostRequest();
-        request.setClientId("CLIENT-1");
-        request.setDealId("DEAL-1");
-        request.setPatternType("VA");
-
-        SubledgerPatternEntity existingEntity = new SubledgerPatternEntity();
-        existingEntity.setPatternId(99L);
-        existingEntity.setClientId("CLIENT-1");
-        existingEntity.setDealId("DEAL-1");
-        existingEntity.setPatternType("VA");
-
-        Pageable nullPageable = null;
-        when(subledgerPatternRepository.findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
-                "CLIENT-1", "DEAL-1", "VA", nullPageable))
-                .thenReturn(new PageImpl<>(List.of(existingEntity), PageRequest.of(0, 1), 1));
-
-        assertThrows(IllegalArgumentException.class, () -> subledgerPatternService.createPattern(request));
-        verify(subledgerPatternRepository, never()).save(any(SubledgerPatternEntity.class));
-    }
 }
 
-With the files you want:
+4) Entity
 package com.sc.scroe.pattern.entity;
 
 //import com.sc.scroe.shared.entity.AuditableSoftDeleteEntity;
@@ -344,7 +168,6 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.math.BigInteger;
 import java.time.LocalDateTime;
 
 @Data
@@ -363,7 +186,7 @@ public class SubledgerPatternEntity {
     private String clientId;
 
     @Column(name = "deal_id", nullable = false, length = 100)
-    private String dealId; //CHeck in other services, partyRefId column to be checked
+    private String dealId;
 
     @Column(name = "pattern_type", nullable = false, length = 20)
     private String patternType;
@@ -390,97 +213,78 @@ public class SubledgerPatternEntity {
     }
 }
 
-package com.sc.scroe.pattern.constant;
+5) ExceptionHandler
 
-public class PatternConstants {
+package com.sc.scroe.controller;
 
-    public enum PatternType {
+import com.sc.scroe.exception.ErrorResponse;
+import com.sc.scroe.exception.ResourceNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-        SUBACCOUNT("SUBACCOUNT"),
-        VA("VA"),
-        HYBRID("HYBRID");
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
-        private final String value;
+@RestControllerAdvice
+public class GlobalExceptionHandler {
 
-        PatternType(String value) {
-            this.value = value;
-        }
+    private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-        public String getValue() {
-            return value;
-        }
-
-        public static boolean isValid(String value) {
-            if (value == null) {
-                return false;
-            }
-
-            String trimmedValue = value.trim();
-            for (PatternType patternType : values()) {
-                if (patternType.getValue().equalsIgnoreCase(trimmedValue)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-    }
-}
-package com.sc.scroe.pattern.response;
-
-import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-import java.util.List;
-
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class SubledgerPatternResponse {
-    private Integer page;
-    private Integer pageCount;
-    private Long totalCount;
-    private List<SubledgerPatternEntity> data;
-}
-package com.sc.scroe.pattern.repository;
-
-import com.sc.scroe.pattern.entity.SubledgerPatternEntity;
-
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
-
-public interface SubledgerPatternRepository extends JpaRepository<SubledgerPatternEntity, String>, JpaSpecificationExecutor<SubledgerPatternEntity> {
-
-    Page<SubledgerPatternEntity> findAllByClientIdAndDealIdAndPatternTypeAndDeleteFlagFalse(
-            String clientId,
-            String dealId,
-            String patternType,
-            Pageable pageable);
-
-    Page<SubledgerPatternEntity> findAllByClientIdAndDealIdAndDeleteFlagFalse(
-            String clientId,
-            String dealId,
-            Pageable pageable);
-
-    Page<SubledgerPatternEntity> findAllByDeleteFlagFalse(Pageable pageable);
-
-}
-package com.sc.scroe.pattern.service.PageService;
-
-import org.springframework.data.domain.PageRequest;
-import org.springframework.stereotype.Service;
-import org.springframework.data.domain.Pageable;
-
-@Service
-public class PatternPageService {
-
-        public Pageable createPageable(Integer page, Integer pageSize) {
-        int safePage = page == null || page < 1 ? 0 : page - 1;
-        int safePageSize = pageSize == null || pageSize < 1 ? 10 : Math.min(pageSize, 20);
-        return PageRequest.of(safePage, safePageSize);
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
+        String details = ex.getBindingResult()
+                .getFieldErrors()
+                .stream()
+                .map(err -> err.getField() + ": " + err.getDefaultMessage())
+                .reduce((a, b) -> a + "; " + b)
+                .orElse(ex.getMessage());
+        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
+        Map<String, String> error = new LinkedHashMap<>();
+        error.put("code", "ERR01");
+        error.put("description", details);
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse(Arrays.asList(error)));
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleBadRequest(IllegalArgumentException ex) {
+        Map<String, String> error = new LinkedHashMap<>();
+        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
+        error.put("code", "ERR01");
+        error.put("description", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse(Arrays.asList(error)));
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex) {
+        Map<String, String> error = new LinkedHashMap<>();
+        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
+        error.put("code", "ERR01");
+        error.put("description", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(new ErrorResponse(Arrays.asList(error)));
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex) {
+        Map<String, String> error = new LinkedHashMap<>();
+        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
+        error.put("code", "ERR01");
+        error.put("description", "Technical Issue - Please contact the support team");
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ErrorResponse(Arrays.asList(error)));
+    }
 }
+
+Please do all the changes and give updated code.
