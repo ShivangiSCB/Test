@@ -1,290 +1,144 @@
-Requirement:
-POST API for subledger_masteraccount table:
-URL: /v1/subledger/masteraccounts
+package com.sc.scroe.masteraccount.entity;
 
-Request:
-{
-    "dealId": "DEAL-20260703-001",
-     “clientId": "CLIENT001",
-  "masterAccountNumber": "1234567890",
-    "masterAccountCountry": "GB",
-  "masterAccountCurrencyCode": "GBP",
-  "masterAccountName": "ABC Corporation",
- "companyInitial": "SCBDD",
-    "clientType": "IH",
-    "subAccountType": "Savings",  - Manual input
-    "productCode": "601,
-    "accountClassificationCode": "232053”,
-    "subKycCddFlag": "Y",
-    "subKycCddRiskCode": "ABC",      --single value only possible (Changed in master setup table from multi value selected to single value 
-    "subDefaultRiskCodeHoldFlag": "Y",
-    "subDefaultRiskCode": ["HOLD01","HOLD02"]  - comma separated value stored in DB
-    "masterAccountAddressInheritFlag": "Y",
-    "clientsMoney": "Y",
-    “infoCodeClientsMoney[KM2.1]”:””,
-    "subAccountClosureOffset": "Y",
-    [KM3.1]"miscInfos": [
-                {
-                    "infoCode1": "SCR",
-                    "infoValue1": "N"
-                },
-                {
-                    "infoCode2": "WSC",
-                    "infoValue2": "00"
-                }
-            ],   
-    "accountBranch": "066",
-    "consolidatedStatementFlag": "Y",
-    "glid": "9999999999",
-    "masterNumber": "3094154",
-    "accountCategory": "C",
-    "dsrClosingId": "DSR001",
-    "adviseInterestIndicator": "3",
-    "ibanNumber": "GB29NWBK60161331926819",
-    "closeDate": "2027-12-31",   //YYYY-MM-DD
-    "subProductCode": "DD",
-    "creditInterestCode": "00",
-    "debitInterestCode": "01",
-    "interestCode": "9999",
-    "suppressStatementFlag": "Y",
-    "creditSubAccountInterestToMasterAccount": "Y",
-    "maxSubAccountLimit": "99",
-    "openedOn": "2026-07-03", //YYYY-MM-DD
-    "ebbsAccountStatus": "A"
-    }
-Field Reference:
-Field	Type	Mandatory	Notes
-dealId	string	Yes	 
-clientId	string	Yes	 
-masterAccountNumber	string	Yes	 
-masterAccountCountry	string	Yes	 
-masterAccountCurrencyCode	string	Yes	 
-masterAccountName	string	Optional	 
-companyInitial	string	Optional	 
-clientType	string	Optional	 
-subAccountType	string	Optional	Manual input
-productCode	string	Optional	
-accountClassificationCode	string	Optional	
-subKycCddFlag	string	Optional	 
-subKycCddRiskCode	string	Optional	Single value only
-subDefaultRiskCodeHoldFlag	string	Optional	 
-subDefaultRiskCode	array of strings	Optional	Multiple hold codes; stored as comma-separated in DB
-masterAccountAddressInheritFlag	string	Optional	 
-clientsMoney	string	Optional	 
-infoCodeClientsMoney	String	Optional	
-subAccountClosureOffset	string	Optional	 
-infoCode1	string	Optional	 
-infoValue1	String	Optional	
-infoCode2	string	Optional	 
-infoValue2	String	Optional	
-accountBranch	string	Optional	 
-consolidatedStatementFlag	string	Optional	 
-glid	string	Optional	 
-masterNumber	string	Yes	 
-accountCategory	string	Optional	 
-dsrClosingId	string	Optional	 
-adviseInterestIndicator	string	Optional	 
-ibanNumber	string	Optional	 
-closeDate	string (date)	Optional	YYYY-MM-DD
-subProductCode	string	Optional	 
-creditInterestCode	string	Optional	 
-debitInterestCode	string	Optional	 
-interestCode	string	Optional	 
-suppressStatementFlag	string	Optional	 
-creditSubAccountInterestToMasterAccount	string	Optional	 
-maxSubAccountLimit	string	Optional	 
-openedOn	string (date)	Optional	YYYY-MM-DD
-ebbsAccountStatus	string	Optional	 
-
-Response:
-
-JSON	Data Type	Description
-200 OK		
-{		
-"masterAccountId":"MAS001"	String	Unique reference number of master account setup table
-}		
-
-
-
-400 Error		
-{		
-   "errors":[{		
-      "code": " ERR01",	String	Error code to classify the type of error
-      "description" :"master account number already exist"	String	Description of the error
-  }]		
-}		
-404 Error		
-{		
-   "errors":[{		
-      "code": " ERR01",	String	Error code to classify the type of error
-      "description" :"Invalid input fields"	String	Description of the error
-  }]		
-}		
-500 Error		
-{		
-   "errors":[{		
-      "code": " ERR01",	String	Error code to classify the type of error
-      "description" :"Technical Issue - Please contact the support team"	String	Description of the error
-   }]		
-}
-
-I have already created:
-
-1) Controller:
-    @PostMapping(path = "/masteraccount", consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<String> create(@RequestBody MasterAccountPostRequest request) {
-        subledgerMasteraccountService.createMasterAccount(request);
-        return ResponseEntity.ok("SUCCESS");
-    }
-
-2) ServiceImpl
-    @Override
-    public void createMasterAccount(MasterAccountPostRequest request) {
-        SubledgerMasteraccountEntity entity = new SubledgerMasteraccountEntity();
-        mapPostRequestToEntity(request, entity);
-        subledgerMasteraccountRepository.save(entity);
-    }
-
-3) Repository
-public interface SubledgerMasteraccountRepository extends JpaRepository<SubledgerMasteraccountEntity, Long> {
-
-	Optional<SubledgerMasteraccountEntity> findFirstByDealIdAndDeleteFlagFalse(String dealId);
-
-	Optional<SubledgerMasteraccountEntity> findFirstByDealIdAndClientIdAndDeleteFlagFalse(String dealId, String clientId);
-
-	Page<SubledgerMasteraccountEntity> findByDeleteFlagFalse(Pageable pageable);
-
-	Page<SubledgerMasteraccountEntity> findByDealIdAndClientIdAndDeleteFlagFalse(String dealId, String clientId, Pageable pageable);
-
-}
-
-4) Entity
-package com.sc.scroe.pattern.entity;
-
-//import com.sc.scroe.shared.entity.AuditableSoftDeleteEntity;
+import com.sc.scroe.shared.entity.SharedEntity;
 import jakarta.persistence.*;
-import lombok.Data;
-import lombok.Getter;
-import lombok.Setter;
 
-import java.time.LocalDateTime;
+import java.time.LocalDate;
+
+import lombok.Data;
 
 @Data
 @Entity
-@Table(name = "subledger_pattern")
-@Getter
-@Setter
-public class SubledgerPatternEntity {
+@Table(name = "subledger_masteraccount")
+public class SubledgerMasteraccountEntity extends SharedEntity {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "pattern_id")
-    private Long patternId;
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "subledger_masteraccount_seq")
+    @SequenceGenerator(name = "subledger_masteraccount_seq", sequenceName = "subledger_masteraccount_seq", allocationSize = 1)
+    @Column(name = "masteraccount_id", nullable = false)
+    private Long masteraccountId;
+
+    @Column(name = "account_id", nullable = false, length = 50)
+    private String accountId;
+
+    @Column(name = "master_number", nullable = false, length = 30)
+    private String masterNumber;
 
     @Column(name = "client_id", nullable = false, length = 100)
     private String clientId;
 
-    @Column(name = "deal_id", nullable = false, length = 100)
+    @Column(name = "deal_id", nullable = false, length = 30)
     private String dealId;
 
-    @Column(name = "pattern_type", nullable = false, length = 20)
-    private String patternType;
+    @Column(name = "account_number", nullable = false, length = 30)
+    private String accountNumber;
 
-    @Column(name = "delete_flag", nullable = false)
-    private boolean deleteFlag = false;
+    @Column(name = "country_code", nullable = false, length = 2)
+    private String countryCode;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    @Column(name = "currency_code", nullable = false, length = 3)
+    private String currencyCode;
 
-    @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updatedAt;
+    @Column(name = "account_branch", length = 20)
+    private String accountBranch;
 
-    @PrePersist
-    protected void onCreate() {
-        LocalDateTime now = LocalDateTime.now();
-        this.createdAt = now;
-        this.updatedAt = now;
-    }
+    @Column(name = "company_initial", length = 5)
+    private String companyInitial;
 
-    @PreUpdate
-    protected void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
-    }
+    @Column(name = "account_name", length = 110)
+    private String accountName;
+
+    @Column(name = "iban_number", length = 34)
+    private String ibanNumber;
+
+    @Column(name = "account_status", length = 1)
+    private String accountStatus;
+
+    @Column(name = "account_opened_date")
+    private LocalDate accountOpenedDate;
+
+    @Column(name = "account_closed_date")
+    private LocalDate accountClosedDate;
+
+    @Column(name = "client_type", nullable = false, length = 10)
+    private String clientType;
+
+    @Column(name = "account_type", nullable = false, length = 20)
+    private String accountType;
+
+    @Column(name = "product_code", length = 20)
+    private String productCode;
+
+    @Column(name = "sub_product_code", length = 50)
+    private String subProductCode;
+
+    @Column(name = "max_sub_account_limit")
+    private Integer maxSubAccountLimit;
+
+    @Column(name = "classification_code", length = 20)
+    private String classificationCode;
+
+    @Column(name = "sublite_kyc_cdd_flag", nullable = false, length = 1)
+    private String subliteKycCddFlag;
+
+    @Column(name = "sublite_kyc_cdd_risk_code", length = 255)
+    private String subliteKycCddRiskCode;
+
+    @Column(name = "sub_default_risk_code_flag", nullable = false, length = 1)
+    private String subDefaultRiskCodeFlag;
+
+    @Column(name = "sub_default_risk_code", length = 255)
+    private String subDefaultRiskCode;
+
+    @Column(name = "address_inherit_flag", nullable = false, length = 1)
+    private String addressInheritFlag;
+
+    @Column(name = "clients_money", nullable = false, length = 1)
+    private String clientsMoney;
+
+    @Column(name = "sub_account_closure_offset", nullable = false, length = 1)
+    private String subAccountClosureOffset;
+
+    @Column(name = "info_code", nullable = false, length = 255)
+    private String infoCode;
+
+    @Column(name = "info_value", length = 255)
+    private String infoValue;
+
+    @Column(name = "glid", length = 30)
+    private String glid;
+
+    @Column(name = "consolidated_statement_flag", length = 1)
+    private String consolidatedStatementFlag;
+
+    @Column(name = "account_category", length = 20)
+    private String accountCategory;
+
+    @Column(name = "dsr_closing_id", length = 20)
+    private String dsrClosingId;
+
+    @Column(name = "advise_interest_indicator", length = 1)
+    private String adviseInterestIndicator;
+
+    @Column(name = "credit_sub_acct_int_to_mast", nullable = false, length = 1)
+    private String creditSubAcctIntToMast;
+
+    @Column(name = "credit_interest_code", length = 20)
+    private String creditInterestCode;
+
+    @Column(name = "debit_interest_code", length = 20)
+    private String debitInterestCode;
+
+    @Column(name = "suppress_statement_flag", nullable = false, length = 1)
+    private String suppressStatementFlag;
+
+    @Column(name = "interest_code", nullable = false, length = 20)
+    private String interestCode;
+
+    @Column(name = "credit_interest_account_number", length = 40)
+    private String creditInterestAccountNumber;
+
+    @Column(name = "credit_interest_currency_code", length = 3)
+    private String creditInterestCurrencyCode;
 }
 
-5) ExceptionHandler
-
-package com.sc.scroe.controller;
-
-import com.sc.scroe.exception.ErrorResponse;
-import com.sc.scroe.exception.ResourceNotFoundException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
-
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.Map;
-
-@RestControllerAdvice
-public class GlobalExceptionHandler {
-
-    private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
-
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
-        String details = ex.getBindingResult()
-                .getFieldErrors()
-                .stream()
-                .map(err -> err.getField() + ": " + err.getDefaultMessage())
-                .reduce((a, b) -> a + "; " + b)
-                .orElse(ex.getMessage());
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        Map<String, String> error = new LinkedHashMap<>();
-        error.put("code", "ERR01");
-        error.put("description", details);
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(new ErrorResponse(Arrays.asList(error)));
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ErrorResponse> handleBadRequest(IllegalArgumentException ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", "ERR01");
-        error.put("description", ex.getMessage());
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(new ErrorResponse(Arrays.asList(error)));
-    }
-
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", "ERR01");
-        error.put("description", ex.getMessage());
-        return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(new ErrorResponse(Arrays.asList(error)));
-    }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", "ERR01");
-        error.put("description", "Technical Issue - Please contact the support team");
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new ErrorResponse(Arrays.asList(error)));
-    }
-}
-
-Please do all the changes and give updated code.
