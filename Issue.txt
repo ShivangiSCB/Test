@@ -1,198 +1,189 @@
-So sorry for providing wrong entity, the below file is existing one:
-package com.sc.scroe.masteraccount.entity;
+Can you update below mapRequestEntity please according to the entity I provided and also PostRequest and also suggest necessary changes to be done in other files.
+package com.sc.scroe.masteraccount.util;
 
-import com.sc.scroe.shared.entity.SharedEntity;
-import jakarta.persistence.*;
+import com.sc.scroe.masteraccount.entity.SubledgerMasteraccountEntity;
+import com.sc.scroe.masteraccount.request.MasterAccountPostRequest;
+import org.springframework.stereotype.Component;
+
+@Component
+public class SubledgerMasterAccountUtil {
+
+    private void mapPostRequestToEntity(
+            MasterAccountPostRequest request,
+            SubledgerMasteraccountEntity entity) {
+
+        entity.setDealId(request.getDealId());
+        entity.setClientId(request.getClientId());
+
+        entity.setMasterAccountNumber(request.getMasterAccountNumber());
+        entity.setMasterAccountCountry(request.getMasterAccountCountry());
+        entity.setMasterAccountCurrencyCode(request.getMasterAccountCurrencyCode());
+
+        entity.setMasterAccountName(request.getMasterAccountName());
+        entity.setCompanyInitial(request.getCompanyInitial());
+        entity.setClientType(request.getClientType());
+        entity.setSubAccountType(request.getSubAccountType());
+        entity.setProductCode(request.getProductCode());
+
+        entity.setAccountClassificationCode(
+                request.getAccountClassificationCode());
+
+        entity.setSubKycCddFlag(request.getSubKycCddFlag());
+
+        entity.setSubKycCddRiskCode(
+                request.getSubKycCddRiskCode());
+
+        entity.setSubDefaultRiskCodeHoldFlag(
+                request.getSubDefaultRiskCodeHoldFlag());
+
+        entity.setSubDefaultRiskCode(
+                request.getSubDefaultRiskCode() == null
+                        ? null
+                        : String.join(",",
+                        request.getSubDefaultRiskCode()));
+
+        entity.setMasterAccountAddressInheritFlag(
+                request.getMasterAccountAddressInheritFlag());
+
+        entity.setClientsMoney(request.getClientsMoney());
+
+        entity.setInfoCodeClientsMoney(
+                request.getInfoCodeClientsMoney());
+
+        entity.setSubAccountClosureOffset(
+                request.getSubAccountClosureOffset());
+
+        if (request.getMiscInfos() != null) {
+
+            entity.setMiscInfos(
+                    new ObjectMapper()
+                            .writeValueAsString(
+                                    request.getMiscInfos()));
+        }
+
+        entity.setAccountBranch(request.getAccountBranch());
+        entity.setConsolidatedStatementFlag(
+                request.getConsolidatedStatementFlag());
+
+        entity.setGlid(request.getGlid());
+
+        entity.setMasterNumber(request.getMasterNumber());
+
+        entity.setAccountCategory(
+                request.getAccountCategory());
+
+        entity.setDsrClosingId(
+                request.getDsrClosingId());
+
+        entity.setAdviseInterestIndicator(
+                request.getAdviseInterestIndicator());
+
+        entity.setIbanNumber(
+                request.getIbanNumber());
+
+        entity.setCloseDate(request.getCloseDate());
+
+        entity.setSubProductCode(
+                request.getSubProductCode());
+
+        entity.setCreditInterestCode(
+                request.getCreditInterestCode());
+
+        entity.setDebitInterestCode(
+                request.getDebitInterestCode());
+
+        entity.setInterestCode(
+                request.getInterestCode());
+
+        entity.setSuppressStatementFlag(
+                request.getSuppressStatementFlag());
+
+        entity.setCreditSubAccountInterestToMasterAccount(
+                request.getCreditSubAccountInterestToMasterAccount());
+
+        entity.setMaxSubAccountLimit(
+                request.getMaxSubAccountLimit());
+
+        entity.setOpenedOn(request.getOpenedOn());
+
+        entity.setEbbsAccountStatus(
+                request.getEbbsAccountStatus());
+    }
+}
+
+package com.sc.scroe.masteraccount.request;
 
 import java.time.LocalDate;
+import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
-@Entity
-@Table(name = "subledger_masteraccount")
-public class SubledgerMasteraccountEntity extends SharedEntity {
+public class MasterAccountPostRequest {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "subledger_masteraccount_seq")
-    @SequenceGenerator(name = "subledger_masteraccount_seq", sequenceName = "subledger_masteraccount_seq", allocationSize = 1)
-    @Column(name = "masteraccount_id", nullable = false)
-    private Long masteraccountId;
-
-    @Column(name = "account_id", nullable = false, length = 50)
-    private String accountId;
-
-    @Column(name = "master_number", nullable = false, length = 30)
-    private String masterNumber;
-
-    @Column(name = "client_id", nullable = false, length = 100)
-    private String clientId;
-
-    @Column(name = "deal_id", nullable = false, length = 30)
+    @NotBlank
     private String dealId;
 
-    @Column(name = "account_number", nullable = false, length = 30)
-    private String accountNumber;
+    @NotBlank
+    private String clientId;
 
-    @Column(name = "country_code", nullable = false, length = 2)
-    private String countryCode;
+    @NotBlank
+    private String masterAccountNumber;
 
-    @Column(name = "currency_code", nullable = false, length = 3)
-    private String currencyCode;
+    @NotBlank
+    private String masterAccountCountry;
 
-    @Column(name = "account_branch", length = 20)
-    private String accountBranch;
+    @NotBlank
+    private String masterAccountCurrencyCode;
 
-    @Column(name = "company_initial", length = 5)
+    private String masterAccountName;
     private String companyInitial;
-
-    @Column(name = "account_name", length = 110)
-    private String accountName;
-
-    @Column(name = "iban_number", length = 34)
-    private String ibanNumber;
-
-    @Column(name = "account_status", length = 1)
-    private String accountStatus;
-
-    @Column(name = "account_opened_date")
-    private LocalDate accountOpenedDate;
-
-    @Column(name = "account_closed_date")
-    private LocalDate accountClosedDate;
-
-    @Column(name = "client_type", nullable = false, length = 10)
     private String clientType;
-
-    @Column(name = "account_type", nullable = false, length = 20)
-    private String accountType;
-
-    @Column(name = "product_code", length = 20)
+    private String subAccountType;
     private String productCode;
+    private String accountClassificationCode;
+    private String subKycCddFlag;
+    private String subKycCddRiskCode;
+    private String subDefaultRiskCodeHoldFlag;
 
-    @Column(name = "sub_product_code", length = 50)
-    private String subProductCode;
+    private List<String> subDefaultRiskCode;
 
-    @Column(name = "max_sub_account_limit")
-    private Integer maxSubAccountLimit;
-
-    @Column(name = "classification_code", length = 20)
-    private String classificationCode;
-
-    @Column(name = "sublite_kyc_cdd_flag", nullable = false, length = 1)
-    private String subliteKycCddFlag;
-
-    @Column(name = "sublite_kyc_cdd_risk_code", length = 255)
-    private String subliteKycCddRiskCode;
-
-    @Column(name = "sub_default_risk_code_flag", nullable = false, length = 1)
-    private String subDefaultRiskCodeFlag;
-
-    @Column(name = "sub_default_risk_code", length = 255)
-    private String subDefaultRiskCode;
-
-    @Column(name = "address_inherit_flag", nullable = false, length = 1)
-    private String addressInheritFlag;
-
-    @Column(name = "clients_money", nullable = false, length = 1)
+    private String masterAccountAddressInheritFlag;
     private String clientsMoney;
-
-    @Column(name = "sub_account_closure_offset", nullable = false, length = 1)
+    private String infoCodeClientsMoney;
     private String subAccountClosureOffset;
 
-    @Column(name = "info_code", nullable = false, length = 255)
-    private String infoCode;
+    private List<MiscInfoDTO> miscInfos;
 
-    @Column(name = "info_value", length = 255)
-    private String infoValue;
-
-    @Column(name = "glid", length = 30)
+    private String accountBranch;
+    private String consolidatedStatementFlag;
     private String glid;
 
-    @Column(name = "consolidated_statement_flag", length = 1)
-    private String consolidatedStatementFlag;
+    @NotBlank
+    private String masterNumber;
 
-    @Column(name = "account_category", length = 20)
     private String accountCategory;
-
-    @Column(name = "dsr_closing_id", length = 20)
     private String dsrClosingId;
-
-    @Column(name = "advise_interest_indicator", length = 1)
     private String adviseInterestIndicator;
+    private String ibanNumber;
 
-    @Column(name = "credit_sub_acct_int_to_mast", nullable = false, length = 1)
-    private String creditSubAcctIntToMast;
+    @JsonFormat(pattern = "yyyy-MM-dd")
+    private LocalDate closeDate;
 
-    @Column(name = "credit_interest_code", length = 20)
+    private String subProductCode;
     private String creditInterestCode;
-
-    @Column(name = "debit_interest_code", length = 20)
     private String debitInterestCode;
-
-    @Column(name = "suppress_statement_flag", nullable = false, length = 1)
-    private String suppressStatementFlag;
-
-    @Column(name = "interest_code", nullable = false, length = 20)
     private String interestCode;
+    private String suppressStatementFlag;
+    private String creditSubAccountInterestToMasterAccount;
+    private String maxSubAccountLimit;
 
-    @Column(name = "credit_interest_account_number", length = 40)
-    private String creditInterestAccountNumber;
+    @JsonFormat(pattern = "yyyy-MM-dd")
+    private LocalDate openedOn;
 
-    @Column(name = "credit_interest_currency_code", length = 3)
-    private String creditInterestCurrencyCode;
+    private String ebbsAccountStatus;
 }
 
-The below table is updated one so need to do changes according to that
-CREATE TABLE subledger_masteraccount (
-    masteraccount_id BIGINT NOT NULL,
-    master_number VARCHAR(30) NOT NULL,
-    client_id VARCHAR(100) NOT NULL,
-    deal_id VARCHAR(100) NOT NULL,
-    account_number VARCHAR(30) NOT NULL,
-    country_code VARCHAR(2) NOT NULL,
-    currency_code VARCHAR(3) NOT NULL,
-    account_branch VARCHAR(20),
-    company_initial VARCHAR(5),
-    account_name VARCHAR(110),
-    iban_number VARCHAR(34),
-    account_status CHAR(1), -- Updated from VARCHAR to CHAR
-    account_opened_date DATE,
-    account_closed_date DATE,
-    client_type VARCHAR(10) NOT NULL,
-    product_code VARCHAR(20),
-    sub_product_code VARCHAR(20), -- Updated from 50 to 20
-    max_sub_account_limit INTEGER NOT NULL DEFAULT 0,
-    classification_code VARCHAR(20),
-    sublite_kyc_cdd_flag CHAR(1) NOT NULL,
-    sublite_kyc_cdd_risk_code VARCHAR(255),
-    sub_default_risk_code_flag CHAR(1) NOT NULL,
-    sub_default_risk_code VARCHAR(255),
-    address_inherit_flag CHAR(1) NOT NULL,
-    sub_account_closure_offset CHAR(1) NOT NULL,
-    clients_money CHAR(1) NOT NULL,
-    clients_money_value VARCHAR(99), -- New field
-    info_code1 CHAR(3),
-    info_value1 VARCHAR(99),
-    info_code2 CHAR(3),
-    info_value2 VARCHAR(99),
-    glid VARCHAR(30),
-    consolidated_statement_flag CHAR(1),
-    account_category VARCHAR(20),
-    dsr_closing_id VARCHAR(20),
-    advise_interest_indicator CHAR(1),
-    credit_sub_acct_int_to_mast CHAR(1) NOT NULL DEFAULT 'N',
-    credit_interest_code VARCHAR(20),
-    debit_interest_code VARCHAR(20),
-    suppress_statement_flag CHAR(1) NOT NULL,
-    interest_code VARCHAR(20) NOT NULL,
-    credit_interest_account_number VARCHAR(40),
-    credit_interest_currency_code VARCHAR(3),
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    delete_flag BOOLEAN NOT NULL DEFAULT FALSE,
-    CONSTRAINT pk_subledger_masteraccount PRIMARY KEY (masteraccount_id),
-    CONSTRAINT uk_subledger_masteraccount_acct_country_curr UNIQUE (account_number, country_code, currency_code)
-);
 
-Can you please help me wherever changes required according to the table please?
