@@ -1,3 +1,4 @@
+So sorry for providing wrong entity, the below file is existing one:
 package com.sc.scroe.masteraccount.entity;
 
 import com.sc.scroe.shared.entity.SharedEntity;
@@ -142,3 +143,56 @@ public class SubledgerMasteraccountEntity extends SharedEntity {
     private String creditInterestCurrencyCode;
 }
 
+The below table is updated one so need to do changes according to that
+CREATE TABLE subledger_masteraccount (
+    masteraccount_id BIGINT NOT NULL,
+    master_number VARCHAR(30) NOT NULL,
+    client_id VARCHAR(100) NOT NULL,
+    deal_id VARCHAR(100) NOT NULL,
+    account_number VARCHAR(30) NOT NULL,
+    country_code VARCHAR(2) NOT NULL,
+    currency_code VARCHAR(3) NOT NULL,
+    account_branch VARCHAR(20),
+    company_initial VARCHAR(5),
+    account_name VARCHAR(110),
+    iban_number VARCHAR(34),
+    account_status CHAR(1), -- Updated from VARCHAR to CHAR
+    account_opened_date DATE,
+    account_closed_date DATE,
+    client_type VARCHAR(10) NOT NULL,
+    product_code VARCHAR(20),
+    sub_product_code VARCHAR(20), -- Updated from 50 to 20
+    max_sub_account_limit INTEGER NOT NULL DEFAULT 0,
+    classification_code VARCHAR(20),
+    sublite_kyc_cdd_flag CHAR(1) NOT NULL,
+    sublite_kyc_cdd_risk_code VARCHAR(255),
+    sub_default_risk_code_flag CHAR(1) NOT NULL,
+    sub_default_risk_code VARCHAR(255),
+    address_inherit_flag CHAR(1) NOT NULL,
+    sub_account_closure_offset CHAR(1) NOT NULL,
+    clients_money CHAR(1) NOT NULL,
+    clients_money_value VARCHAR(99), -- New field
+    info_code1 CHAR(3),
+    info_value1 VARCHAR(99),
+    info_code2 CHAR(3),
+    info_value2 VARCHAR(99),
+    glid VARCHAR(30),
+    consolidated_statement_flag CHAR(1),
+    account_category VARCHAR(20),
+    dsr_closing_id VARCHAR(20),
+    advise_interest_indicator CHAR(1),
+    credit_sub_acct_int_to_mast CHAR(1) NOT NULL DEFAULT 'N',
+    credit_interest_code VARCHAR(20),
+    debit_interest_code VARCHAR(20),
+    suppress_statement_flag CHAR(1) NOT NULL,
+    interest_code VARCHAR(20) NOT NULL,
+    credit_interest_account_number VARCHAR(40),
+    credit_interest_currency_code VARCHAR(3),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    delete_flag BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT pk_subledger_masteraccount PRIMARY KEY (masteraccount_id),
+    CONSTRAINT uk_subledger_masteraccount_acct_country_curr UNIQUE (account_number, country_code, currency_code)
+);
+
+Can you please help me wherever changes required according to the table please?
