@@ -1,206 +1,258 @@
-Create testcases for the following code files with 100% code and line coverage.
-    
-    @PostMapping(path = "/masteraccounts", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<MasterAccountPostResponse> create(@Valid @RequestBody MasterAccountPostRequest request) {
-        if(request == null) {
-            throw new ResourceNotFoundException("Invalid Input Fields", "404");
-        }
-        MasterAccountPostResponse masterAccountPostResponse = subledgerMasteraccountService.createMasterAccount(request);
-        logger.info("Created Master Account for accountNumber: {}", masterAccountPostResponse.getMasterAccountId());
-        return ResponseEntity.ok(new MasterAccountPostResponse(masterAccountPostResponse.getMasterAccountId()));
-    }
+package com.sc.scroe.masteraccount.service;
 
-        @Override
-    @Transactional
-    public MasterAccountPostResponse createMasterAccount(MasterAccountPostRequest request) {
+import com.sc.scroe.masteraccount.constant.MasterAcctConstants;
+import com.sc.scroe.masteraccount.dto.CreateMasterAccountRequest;
+import com.sc.scroe.masteraccount.dto.CreateMasterAccountResponse;
+import com.sc.scroe.masteraccount.entity.SubledgerMasteraccountEntity;
+import com.sc.scroe.masteraccount.repository.SubledgerMasteraccountRepository;
 
-        if (subledgerMasteraccountRepository.existsByAccountNumberAndCountryCodeAndCurrencyCodeAndDeleteFlagFalse(
-                request.getMasterAccountNumber(),
-                request.getMasterAccountCountry(),
-                request.getMasterAccountCurrencyCode())) {
+//import com.sc.scroe.masteraccount.response.MasterAccountResponse;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
-            throw new IllegalArgumentException(
-                    "master account number already exist");
-        }
+import com.sc.scroe.shared.util.DataIntegrityViolationParser;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+@Service
+@Transactional
+public class SubledgerMasteraccountServiceImpl implements SubledgerMasteraccountService {
+
+    @Autowired
+    SubledgerMasteraccountRepository subledgerMasteraccountRepository;
+
+    @Autowired
+    SubledgerMasterAccountUtil subledgerMasterAccountUtil;
+
+    @Autowired
+    DataIntegrityViolationParser dataIntegrityViolationParser;
+
+    @Override
+//    @Transactional
+    public CreateMasterAccountResponse createMasterAccount(CreateMasterAccountRequest request) {
+//        if (subledgerMasteraccountRepository.existsByAccountNumberAndCountryCodeAndCurrencyCodeAndDeleteFlagFalse(request.getMasterAccountNumber(), request.getMasterAccountCountry(), request.getMasterAccountCurrencyCode())) {
+//            throw new IllegalArgumentException(MasterAcctConstants.DUPLICATE_MASTER_MESSAGE);
+//        }
         SubledgerMasteraccountEntity entity = new SubledgerMasteraccountEntity();
-
         subledgerMasterAccountUtil.mapPostRequestToEntity(request, entity);
-
-        entity = subledgerMasteraccountRepository.save(entity);
-
-        return new MasterAccountPostResponse(entity.getMasterNumber());
+        SubledgerMasteraccountEntity subledgerMasteraccountEntity;
+        try {
+            subledgerMasteraccountEntity = subledgerMasteraccountRepository.save(entity);
+        } catch (DataIntegrityViolationException ex) {
+            if (dataIntegrityViolationParser.isDuplicateViolation(
+                    ex,
+                    MasterAcctConstants.MASTER_TABLE_NAME,
+                    MasterAcctConstants.MASTER_UNIQUE_COLUMNS)) {
+                throw new IllegalArgumentException(MasterAcctConstants.DUPLICATE_MASTER_MESSAGE);
+            }
+            throw ex;
+        }
+        return new CreateMasterAccountResponse(subledgerMasteraccountEntity.getMasterNumber());
     }
 
-    package com.sc.scroe.masteraccount.entity;
+//    @Override
+//    public void updateMasterAccount(MasterAccountPutRequest request) {
+//        SubledgerMasteraccountEntity entity = subledgerMasteraccountRepository.findFirstByDealIdAndDeleteFlagFalse(request.getDealId()).orElseGet(SubledgerMasteraccountEntity::new);
+//        mapPutRequestToEntity(request, entity);
+//        subledgerMasteraccountRepository.save(entity);
+//    }
 
-import com.sc.scroe.shared.entity.SharedEntity;
-import jakarta.persistence.*;
+//    @Override
+//    public MasterAccountResponse getMasterAccount(String dealId, String clientId, int page, int recordsPerPage) {
+//        Pageable pageable = PageRequest.of(page - 1, recordsPerPage);
+//        Page<SubledgerMasteraccountEntity> records;
+//
+//        if (hasText(dealId) && hasText(clientId)) {
+//            records = subledgerMasteraccountRepository.findByDealIdAndClientIdAndDeleteFlagFalse(dealId, clientId, pageable);
+//        } else {
+//            records = subledgerMasteraccountRepository.findByDeleteFlagFalse(pageable);
+//        }
+//
+//        MasterAccountResponse response = new MasterAccountResponse();
+//        response.setPage(page);
+//        response.setPageCount(records.getTotalPages());
+//        response.setTotalCount(Math.toIntExact(records.getTotalElements()));
+//        response.setData(records.getContent().stream().map(this::mapEntityToResponse).toList());
+//        return response;
+//    }
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
+//    private void mapPostRequestToEntity(MasterAccountPostRequest request, SubledgerMasteraccountEntity entity) {
+//        entity.setAccountId(request.getAccountId());
+//        entity.setMasterNumber(request.getMasterNumber());
+//        entity.setClientId(request.getClientId());
+//        entity.setDealId(request.getDealId());
+//        entity.setAccountNumber(request.getAccountNumber());
+//        entity.setCountryCode(request.getCountryCode());
+//        entity.setCurrencyCode(request.getCurrencyCode());
+//        entity.setAccountBranch(request.getAccountBranch());
+//        entity.setCompanyInitial(request.getCompanyInitial());
+//        entity.setAccountName(request.getAccountName());
+//        entity.setIbanNumber(request.getIbanNumber());
+//        entity.setAccountStatus(request.getAccountStatus());
+//        entity.setAccountOpenedDate(request.getAccountOpenedDate());
+//        entity.setAccountClosedDate(request.getAccountClosedDate());
+//        entity.setClientType(request.getClientType());
+//        entity.setAccountType(request.getAccountType());
+//        entity.setProductCode(request.getProductCode());
+//        entity.setSubProductCode(request.getSubProductCode());
+//        entity.setMaxSubAccountLimit(request.getMaxSubAccountLimit());
+//        entity.setClassificationCode(request.getClassificationCode());
+//        entity.setSubliteKycCddFlag(request.getSubliteKycCddFlag());
+//        entity.setSubliteKycCddRiskCode(request.getSubliteKycCddRiskCode());
+//        entity.setSubDefaultRiskCodeFlag(request.getSubDefaultRiskCodeFlag());
+//        entity.setSubDefaultRiskCode(request.getSubDefaultRiskCode());
+//        entity.setAddressInheritFlag(request.getAddressInheritFlag());
+//        entity.setClientsMoney(request.getClientsMoney());
+//        entity.setSubAccountClosureOffset(request.getSubAccountClosureOffset());
+//        entity.setInfoCode(request.getInfoCode());
+//        entity.setInfoValue(request.getInfoValue());
+//        entity.setGlid(request.getGlid());
+//        entity.setConsolidatedStatementFlag(request.getConsolidatedStatementFlag());
+//        entity.setAccountCategory(request.getAccountCategory());
+//        entity.setDsrClosingId(request.getDsrClosingId());
+//        entity.setAdviseInterestIndicator(request.getAdviseInterestIndicator());
+//        entity.setCreditSubAcctIntToMast(request.getCreditSubAcctIntToMast());
+//        entity.setCreditInterestCode(request.getCreditInterestCode());
+//        entity.setDebitInterestCode(request.getDebitInterestCode());
+//        entity.setSuppressStatementFlag(request.getSuppressStatementFlag());
+//        entity.setInterestCode(request.getInterestCode());
+//        entity.setCreditInterestAccountNumber(request.getCreditInterestAccountNumber());
+//        entity.setCreditInterestCurrencyCode(request.getCreditInterestCurrencyCode());
+//    }
 
-import lombok.Data;
+//    private void mapPutRequestToEntity(MasterAccountPutRequest request, SubledgerMasteraccountEntity entity) {
+//        entity.setAccountId(request.getAccountId());
+//        entity.setMasterNumber(request.getMasterNumber());
+//        entity.setClientId(request.getClientId());
+//        entity.setDealId(request.getDealId());
+//        entity.setAccountNumber(request.getAccountNumber());
+//        entity.setCountryCode(request.getCountryCode());
+//        entity.setCurrencyCode(request.getCurrencyCode());
+//        entity.setAccountBranch(request.getAccountBranch());
+//        entity.setCompanyInitial(request.getCompanyInitial());
+//        entity.setAccountName(request.getAccountName());
+//        entity.setIbanNumber(request.getIbanNumber());
+//        entity.setAccountStatus(request.getAccountStatus());
+//        entity.setAccountOpenedDate(request.getAccountOpenedDate());
+//        entity.setAccountClosedDate(request.getAccountClosedDate());
+//        entity.setClientType(request.getClientType());
+//        entity.setAccountType(request.getAccountType());
+//        entity.setProductCode(request.getProductCode());
+//        entity.setSubProductCode(request.getSubProductCode());
+//        entity.setMaxSubAccountLimit(request.getMaxSubAccountLimit());
+//        entity.setClassificationCode(request.getClassificationCode());
+//        entity.setSubliteKycCddFlag(request.getSubliteKycCddFlag());
+//        entity.setSubliteKycCddRiskCode(request.getSubliteKycCddRiskCode());
+//        entity.setSubDefaultRiskCodeFlag(request.getSubDefaultRiskCodeFlag());
+//        entity.setSubDefaultRiskCode(request.getSubDefaultRiskCode());
+//        entity.setAddressInheritFlag(request.getAddressInheritFlag());
+//        entity.setClientsMoney(request.getClientsMoney());
+//        entity.setSubAccountClosureOffset(request.getSubAccountClosureOffset());
+//        entity.setInfoCode(request.getInfoCode());
+//        entity.setInfoValue(request.getInfoValue());
+//        entity.setGlid(request.getGlid());
+//        entity.setConsolidatedStatementFlag(request.getConsolidatedStatementFlag());
+//        entity.setAccountCategory(request.getAccountCategory());
+//        entity.setDsrClosingId(request.getDsrClosingId());
+//        entity.setAdviseInterestIndicator(request.getAdviseInterestIndicator());
+//        entity.setCreditSubAcctIntToMast(request.getCreditSubAcctIntToMast());
+//        entity.setCreditInterestCode(request.getCreditInterestCode());
+//        entity.setDebitInterestCode(request.getDebitInterestCode());
+//        entity.setSuppressStatementFlag(request.getSuppressStatementFlag());
+//        entity.setInterestCode(request.getInterestCode());
+//        entity.setCreditInterestAccountNumber(request.getCreditInterestAccountNumber());
+//        entity.setCreditInterestCurrencyCode(request.getCreditInterestCurrencyCode());
+//    }
 
-@Data
-@Entity
-@Table(name = "subledger_masteraccount")
-public class SubledgerMasteraccountEntity extends SharedEntity {
+//    private MasterAccountResponse.MasterAccountData mapEntityToResponse(SubledgerMasteraccountEntity entity) {
+//        MasterAccountResponse.MasterAccountData data = new MasterAccountResponse.MasterAccountData();
+//        data.setDealId(entity.getDealId());
+//        data.setClientId(entity.getClientId());
+//        data.setMasterAccountNumber(entity.getAccountNumber());
+//        data.setMasterAccountCountry(entity.getCountryCode());
+//        data.setMasterAccountCurrencyCode(entity.getCurrencyCode());
+//        data.setMasterAccountName(entity.getAccountName());
+//        data.setCompanyInitial(entity.getCompanyInitial());
+//        data.setClientType(entity.getClientType());
+//        data.setSubAccountType(entity.getAccountType());
+//        data.setProductCode(entity.getProductCode());
+//        data.setAccountClassificationCode(entity.getClassificationCode());
+//        data.setSubKycCddFlag(entity.getSubliteKycCddFlag());
+//        data.setSubKycCddRiskCode(entity.getSubliteKycCddRiskCode());
+//        data.setSubDefaultRiskCodeHoldFlag(entity.getSubDefaultRiskCodeFlag());
+//        data.setSubDefaultRiskCode(splitCommaSeparatedValues(entity.getSubDefaultRiskCode()));
+//        data.setMasterAccountAddressInheritFlag(entity.getAddressInheritFlag());
+//        data.setClientsMoney(entity.getClientsMoney());
+//        data.setInfoCodeClientsMoneyKm81(entity.getInfoValue());
+//        data.setSubAccountClosureOffset(entity.getSubAccountClosureOffset());
+//        data.setMiscInfos(buildMiscInfos(entity.getInfoCode(), entity.getInfoValue()));
+//        data.setAccountBranch(entity.getAccountBranch());
+//        data.setConsolidatedStatementFlag(entity.getConsolidatedStatementFlag());
+//        data.setGlid(entity.getGlid());
+//        data.setMasterNumber(entity.getMasterNumber());
+//        data.setAccountCategory(entity.getAccountCategory());
+//        data.setDsrClosingId(entity.getDsrClosingId());
+//        data.setAdviseInterestIndicator(entity.getAdviseInterestIndicator());
+//        data.setIbanNumber(entity.getIbanNumber());
+//        data.setCloseDate(entity.getAccountClosedDate());
+//        data.setSubProductCode(entity.getSubProductCode());
+//        data.setCreditInterestCode(entity.getCreditInterestCode());
+//        data.setDebitInterestCode(entity.getDebitInterestCode());
+//        data.setInterestCode(entity.getInterestCode());
+//        data.setSuppressStatementFlag(entity.getSuppressStatementFlag());
+//        data.setCreditSubAccountInterestToMasterAccount(entity.getCreditSubAcctIntToMast());
+//        data.setMaxSubAccountLimit(entity.getMaxSubAccountLimit() == null ? null : String.valueOf(entity.getMaxSubAccountLimit()));
+//        data.setOpenedOn(entity.getAccountOpenedDate());
+//        data.setEbbsAccountStatus(entity.getAccountStatus());
+//        return data;
+//    }
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "subledger_masteraccount_seq")
-    @SequenceGenerator(name = "subledger_masteraccount_seq", sequenceName = "subledger_masteraccount_seq", allocationSize = 1)
-    @Column(name = "masteraccount_id", nullable = false)
-    private Long masteraccountId;
+    private List<String> splitCommaSeparatedValues(String csvValues) {
+        if (csvValues == null || csvValues.isBlank()) {
+            return Collections.emptyList();
+        }
 
-    @Column(name = "master_number", nullable = false, length = 30)
-    private String masterNumber;
-
-    @Column(name = "client_id", nullable = false, length = 100)
-    private String clientId;
-
-    @Column(name = "deal_id", nullable = false, length = 30)
-    private String dealId;
-
-    @Column(name = "account_number", nullable = false, length = 30)
-    private String accountNumber;
-
-    @Column(name = "country_code", nullable = false, length = 2)
-    private String countryCode;
-
-    @Column(name = "currency_code", nullable = false, length = 3)
-    private String currencyCode;
-
-    @Column(name = "account_branch", length = 20)
-    private String accountBranch;
-
-    @Column(name = "company_initial", length = 5)
-    private String companyInitial;
-
-    @Column(name = "account_name", length = 110)
-    private String accountName;
-
-    @Column(name = "iban_number", length = 34)
-    private String ibanNumber;
-
-    @Column(name = "account_status", length = 1)
-    private String accountStatus;
-
-    @Column(name = "account_opened_date")
-    private LocalDate accountOpenedDate;
-
-    @Column(name = "account_closed_date")
-    private LocalDate accountClosedDate;
-
-    @Column(name = "client_type", nullable = false, length = 10)
-    private String clientType;
-
-    @Column(name = "account_type", nullable = false, length = 20)
-    private String accountType;
-
-    @Column(name = "sub_product_code", length = 20)
-    private String subProductCode;
-
-    @Column(name = "product_code", length = 20)
-    private String productCode;
-
-    @Column(name = "max_sub_account_limit")
-    private Integer maxSubAccountLimit;
-
-    @Column(name = "classification_code", length = 20)
-    private String classificationCode;
-
-    @Column(name = "sublite_kyc_cdd_flag", nullable = false, length = 1)
-    private String subliteKycCddFlag;
-
-    @Column(name = "sublite_kyc_cdd_risk_code", length = 255)
-    private String subliteKycCddRiskCode;
-
-    @Column(name = "sub_default_risk_code_flag", nullable = false, length = 1)
-    private String subDefaultRiskCodeFlag;
-
-    @Column(name = "sub_default_risk_code", length = 255)
-    private String subDefaultRiskCode;
-
-    @Column(name = "address_inherit_flag", nullable = false, length = 1)
-    private String addressInheritFlag;
-
-    @Column(name = "clients_money", nullable = false, length = 1)
-    private String clientsMoney;
-
-    @Column(name = "sub_account_closure_offset", nullable = false, length = 1)
-    private String subAccountClosureOffset;
-
-    @Column(name = "glid", length = 30)
-    private String glid;
-
-    @Column(name = "consolidated_statement_flag", length = 1)
-    private String consolidatedStatementFlag;
-
-    @Column(name = "account_category", length = 20)
-    private String accountCategory;
-
-    @Column(name = "dsr_closing_id", length = 20)
-    private String dsrClosingId;
-
-    @Column(name = "advise_interest_indicator", length = 1)
-    private String adviseInterestIndicator;
-
-    @Column(name = "credit_sub_acct_int_to_mast", nullable = false, length = 1)
-    private String creditSubAcctIntToMast;
-
-    @Column(name = "credit_interest_code", length = 20)
-    private String creditInterestCode;
-
-    @Column(name = "debit_interest_code", length = 20)
-    private String debitInterestCode;
-
-    @Column(name = "suppress_statement_flag", nullable = false, length = 1)
-    private String suppressStatementFlag;
-
-    @Column(name = "interest_code", nullable = false, length = 20)
-    private String interestCode;
-
-    @Column(name = "credit_interest_account_number", length = 40)
-    private String creditInterestAccountNumber;
-
-    @Column(name = "credit_interest_currency_code", length = 3)
-    private String creditInterestCurrencyCode;
-
-    @Column(name = "clients_money_value", length = 99)
-    private String clientsMoneyValue;
-
-    @Column(name = "info_code1", length = 3)
-    private String infoCode1;
-
-    @Column(name = "info_value1", length = 99)
-    private String infoValue1;
-
-    @Column(name = "info_code2", length = 3)
-    private String infoCode2;
-
-    @Column(name = "info_value2", length = 99)
-    private String infoValue2;
-
-    @Column(name = "delete_flag", nullable = false)
-    private boolean deleteFlag = false;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updatedAt;
-
-    @PrePersist
-    protected void onCreate() {
-        LocalDateTime now = LocalDateTime.now();
-        this.createdAt = now;
-        this.updatedAt = now;
+        String[] values = csvValues.split(",");
+        List<String> items = new ArrayList<>();
+        for (String value : values) {
+            String trimmed = value.trim();
+            if (!trimmed.isEmpty()) {
+                items.add(trimmed);
+            }
+        }
+        return items;
     }
 
-    @PreUpdate
-    protected void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
+    private List<Map<String, String>> buildMiscInfos(String infoCodes, String infoValues) {
+        List<String> parsedCodes = splitCommaSeparatedValues(infoCodes);
+        List<String> parsedValues = splitCommaSeparatedValues(infoValues);
+        if (parsedCodes.isEmpty() && parsedValues.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        int size = Math.max(parsedCodes.size(), parsedValues.size());
+        List<Map<String, String>> miscInfos = new ArrayList<>();
+
+        for (int i = 0; i < size; i++) {
+            int sequence = i + 1;
+            Map<String, String> miscInfo = new LinkedHashMap<>();
+            miscInfo.put("infoCode" + sequence, i < parsedCodes.size() ? parsedCodes.get(i) : "");
+            miscInfo.put("infoValue" + sequence, i < parsedValues.size() ? parsedValues.get(i) : "");
+            miscInfos.add(miscInfo);
+        }
+        return miscInfos;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }
 
@@ -228,174 +280,207 @@ public interface SubledgerMasteraccountRepository extends JpaRepository<Subledge
     boolean existsByAccountNumberAndCountryCodeAndCurrencyCodeAndDeleteFlagFalse(String accountNumber, String countryCode, String currencyCode);
 }
 
-package com.sc.scroe.masteraccount.request;
-
-import java.time.LocalDate;
-import java.util.List;
-
-import com.fasterxml.jackson.annotation.JsonFormat;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-
-@Data
-public class MasterAccountPostRequest {
-
-    @NotBlank
-    private String dealId;
-
-    @NotBlank
-    private String clientId;
-
-    @NotBlank
-    private String masterAccountNumber;
-
-    @NotBlank
-    private String masterAccountCountry;
-
-    @NotBlank
-    private String masterAccountCurrencyCode;
-
-    private String masterAccountName;
-
-    private String companyInitial;
-
-    private String clientType;
-
-    // Manual Input
-    private String subAccountType;
-
-    private String productCode;
-
-    private String accountClassificationCode;
-
-    private String subKycCddFlag;
-
-    private String subKycCddRiskCode;
-
-    private String subDefaultRiskCodeHoldFlag;
-
-    private List<String> subDefaultRiskCode;
-
-    private String masterAccountAddressInheritFlag;
-
-    private String clientsMoney;
-
-    // maps to clients_money_value
-    private String infoCodeClientsMoney;
-
-    private String subAccountClosureOffset;
-
-    private List<MiscInfoDTO> miscInfos;
-
-    private String accountBranch;
-
-    private String consolidatedStatementFlag;
-
-    private String glid;
-
-    @NotBlank
-    private String masterNumber;
-
-    private String accountCategory;
-
-    private String dsrClosingId;
-
-    private String adviseInterestIndicator;
-
-    private String ibanNumber;
-
-    @JsonFormat(pattern = "yyyy-MM-dd")
-    private LocalDate closeDate;
-
-    private String subProductCode;
-
-    private String creditInterestCode;
-
-    private String debitInterestCode;
-
-    private String interestCode;
-
-    private String suppressStatementFlag;
-
-    private String creditSubAccountInterestToMasterAccount;
-
-    private Integer maxSubAccountLimit;
-
-    @JsonFormat(pattern = "yyyy-MM-dd")
-    private LocalDate openedOn;
-
-    private String ebbsAccountStatus;
-}
-
-package com.sc.scroe.masteraccount.request;
-
-import lombok.Data;
-
-@Data
-public class MiscInfoDTO {
-    private String infoCode1;
-    private String infoValue1;
-    private String infoCode2;
-    private String infoValue2;
-}
-
-package com.sc.scroe.masteraccount.response;
-
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-@Data
-@AllArgsConstructor
-@NoArgsConstructor
-public class MasterAccountPostResponse {
-
-    private String masterAccountId;
-}
-
 package com.sc.scroe.masteraccount.service;
 
-import com.sc.scroe.masteraccount.request.MasterAccountPostRequest;
-import com.sc.scroe.masteraccount.request.MasterAccountPutRequest;
-import com.sc.scroe.masteraccount.response.MasterAccountPostResponse;
-//import com.sc.scroe.masteraccount.response.MasterAccountResponse;
+import com.sc.scroe.masteraccount.dto.CreateMasterAccountRequest;
+import com.sc.scroe.masteraccount.entity.SubledgerMasteraccountEntity;
 
-public interface SubledgerMasteraccountService {
+import org.springframework.stereotype.Component;
 
-//    void updateMasterAccount(MasterAccountPutRequest request);
+@Component
+public class SubledgerMasterAccountUtil {
 
-    MasterAccountPostResponse createMasterAccount(MasterAccountPostRequest request);
-//    MasterAccountResponse getMasterAccount(String dealId, String clientId, int page, int recordsPerPage);
-}
+    public void mapPostRequestToEntity(CreateMasterAccountRequest request, SubledgerMasteraccountEntity entity) {
 
-@Service
-@Transactional
-public class SubledgerMasteraccountServiceImpl implements SubledgerMasteraccountService {
+        entity.setDealId(request.getDealId());
+        entity.setClientId(request.getClientId());
 
-    @Autowired
-    SubledgerMasteraccountRepository subledgerMasteraccountRepository;
+        entity.setAccountNumber(request.getMasterAccountNumber());
+        entity.setCountryCode(request.getMasterAccountCountry());
+        entity.setCurrencyCode(request.getMasterAccountCurrencyCode());
 
-    @Autowired
-    SubledgerMasterAccountUtil subledgerMasterAccountUtil;
+        entity.setAccountName(request.getMasterAccountName());
+        entity.setCompanyInitial(request.getCompanyInitial());
 
-    @Override
-    @Transactional
-    public MasterAccountPostResponse createMasterAccount(MasterAccountPostRequest request) {
+        entity.setClientType(request.getClientType());
 
-        if (subledgerMasteraccountRepository.existsByAccountNumberAndCountryCodeAndCurrencyCodeAndDeleteFlagFalse(
-                request.getMasterAccountNumber(),
-                request.getMasterAccountCountry(),
-                request.getMasterAccountCurrencyCode())) {
+        entity.setAccountType(request.getSubAccountType());
 
-            throw new IllegalArgumentException(
-                    "master account number already exist");
+        entity.setSubProductCode(request.getProductCode());
+
+        entity.setClassificationCode(request.getAccountClassificationCode());
+        entity.setProductCode(request.getProductCode());
+
+        entity.setSubliteKycCddFlag(request.getSubKycCddFlag());
+
+        entity.setSubliteKycCddRiskCode(request.getSubKycCddRiskCode());
+
+        entity.setSubDefaultRiskCodeFlag(request.getSubDefaultRiskCodeHoldFlag());
+
+        if (request.getSubDefaultRiskCode() != null &&
+                !request.getSubDefaultRiskCode().isEmpty()) {
+
+            entity.setSubDefaultRiskCode(
+                    String.join(",", request.getSubDefaultRiskCode()));
         }
 
-        SubledgerMasteraccountEntity entity = new SubledgerMasteraccountEntity();
+        entity.setAddressInheritFlag(
+                request.getMasterAccountAddressInheritFlag());
 
-        subledgerMasterAccountUtil.mapPostRequestToEntity(request, entity);
+        entity.setClientsMoney(request.getClientsMoney());
 
-        entity = subledgerMasteraccountRepository.save(entity);
+        entity.setClientsMoneyValue(
+                request.getInfoCodeClientsMoney());
 
-        return new MasterAccountPostResponse(entity.getMasterNumber());
+        entity.setSubAccountClosureOffset(
+                request.getSubAccountClosureOffset());
+
+        if (request.getMiscInfos() != null) {
+
+            request.getMiscInfos().forEach(miscInfoDTO -> {
+                if (miscInfoDTO.getInfoCode1() != null) {
+
+                    entity.setInfoCode1(miscInfoDTO.getInfoCode1());
+                    entity.setInfoValue1(miscInfoDTO.getInfoValue1());
+                }
+                if (miscInfoDTO.getInfoCode2() != null) {
+
+                    entity.setInfoCode2(miscInfoDTO.getInfoCode2());
+                    entity.setInfoValue2(miscInfoDTO.getInfoValue2());
+                }
+            });
+        }
+
+        entity.setAccountBranch(request.getAccountBranch());
+
+        entity.setConsolidatedStatementFlag(
+                request.getConsolidatedStatementFlag());
+
+        entity.setGlid(request.getGlid());
+
+        entity.setMasterNumber(request.getMasterNumber());
+
+        entity.setAccountCategory(request.getAccountCategory());
+
+        entity.setDsrClosingId(request.getDsrClosingId());
+
+        entity.setAdviseInterestIndicator(
+                request.getAdviseInterestIndicator());
+
+        entity.setIbanNumber(request.getIbanNumber());
+
+        entity.setAccountClosedDate(request.getCloseDate());
+
+        entity.setSubProductCode(request.getSubProductCode());
+
+        entity.setCreditInterestCode(request.getCreditInterestCode());
+
+        entity.setDebitInterestCode(request.getDebitInterestCode());
+
+        entity.setInterestCode(request.getInterestCode());
+
+        entity.setSuppressStatementFlag(
+                request.getSuppressStatementFlag());
+
+        entity.setCreditSubAcctIntToMast(
+                request.getCreditSubAccountInterestToMasterAccount());
+
+        entity.setMaxSubAccountLimit(
+                request.getMaxSubAccountLimit());
+
+        entity.setAccountOpenedDate(
+                request.getOpenedOn());
+
+        entity.setAccountStatus(
+                request.getEbbsAccountStatus());
     }
+}
+package com.sc.scroe.masteraccount.constant;
+
+public class MasterAcctConstants {
+
+    public enum SubLiteKycCddFlag {
+        Y,N
+    }
+
+    public enum DefaultRiskCodeFlag {
+        Y,N
+    }
+
+    public enum AccountStatus {
+
+        ACTIVE("A"),
+        DORMANT("D"),
+        UNCLAIMED("U"),
+        OPEN("O"),
+        CLOSED("C");
+
+        private final String value;
+
+        AccountStatus(String value) {
+            this.value = value;
+        }
+
+        public String getValue() {
+            return value;
+        }
+    }
+
+    public static final String DUPLICATE_MASTER_MESSAGE = "Subledger Master Account with the same accountNumber, countryCode, and currencyCode already exists.";
+    public static final String MASTER_TABLE_NAME = "subledger_masteraccount";
+    public static final String[] MASTER_UNIQUE_COLUMNS = {
+            "account_number",
+            "country_code",
+            "currency_code",
+    };
+    public static final int DEFAULT_PAGE_SIZE = 10;
+    public static final int MAX_PAGE_SIZE = 20;
+}
+package com.sc.scroe.shared.util;
+
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Component;
+
+@Component
+public class DataIntegrityViolationParser {
+
+    public boolean isDuplicateViolation(DataIntegrityViolationException ex, String tableName, String... columnNames) {
+        Throwable rootCause = ex.getMostSpecificCause();
+        String message = rootCause.getMessage();
+        if (message == null) {
+            message = ex.getMessage();
+        }
+        if (message == null) {
+            return false;
+        }
+
+        String normalizedMessage = message.toLowerCase();
+        if (!normalizedMessage.contains("duplicate key")) {
+            return false;
+        }
+
+        if (tableName != null && !tableName.isBlank() && !normalizedMessage.contains(tableName.toLowerCase())) {
+            return false;
+        }
+
+        if (columnNames == null) {
+            return true;
+        }
+
+        for (String columnName : columnNames) {
+            if (columnName != null && !columnName.isBlank() && !normalizedMessage.contains(columnName.toLowerCase())) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+{
+    "errors": [
+        {
+            "code": "ERR01",
+            "description": "could not execute statement [ERROR: duplicate key value violates unique constraint \"uk_subledger_masteraccount_acct_country_curr\"\n  Detail: Key (account_number, country_code, currency_code)=(1234567890, GB, GBP) already exists.] [insert into subledger_masteraccount (account_branch,account_category,account_closed_date,account_name,account_number,account_opened_date,account_status,account_type,address_inherit_flag,advise_interest_indicator,classification_code,client_id,client_type,clients_money,clients_money_value,company_initial,consolidated_statement_flag,country_code,created_at,credit_interest_account_number,credit_interest_code,credit_interest_currency_code,credit_sub_acct_int_to_mast,currency_code,deal_id,debit_interest_code,delete_flag,dsr_closing_id,glid,iban_number,info_code1,info_code2,info_value1,info_value2,interest_code,master_number,max_sub_account_limit,product_code,sub_account_closure_offset,sub_default_risk_code,sub_default_risk_code_flag,sub_product_code,sublite_kyc_cdd_flag,sublite_kyc_cdd_risk_code,suppress_statement_flag,updated_at,masteraccount_id) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)]; SQL [insert into subledger_masteraccount (account_branch,account_category,account_closed_date,account_name,account_number,account_opened_date,account_status,account_type,address_inherit_flag,advise_interest_indicator,classification_code,client_id,client_type,clients_money,clients_money_value,company_initial,consolidated_statement_flag,country_code,created_at,credit_interest_account_number,credit_interest_code,credit_interest_currency_code,credit_sub_acct_int_to_mast,currency_code,deal_id,debit_interest_code,delete_flag,dsr_closing_id,glid,iban_number,info_code1,info_code2,info_value1,info_value2,interest_code,master_number,max_sub_account_limit,product_code,sub_account_closure_offset,sub_default_risk_code,sub_default_risk_code_flag,sub_product_code,sublite_kyc_cdd_flag,sublite_kyc_cdd_risk_code,suppress_statement_flag,updated_at,masteraccount_id) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)]; constraint [uk_subledger_masteraccount_acct_country_curr]"
+        }
+    ]
+}
