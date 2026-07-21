@@ -1,90 +1,458 @@
-    @PostMapping(path = "/masteraccounts", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<CreateMasterAccountResponse> create(@Valid @RequestBody CreateMasterAccountRequest request) {
-        CreateMasterAccountResponse masterAccountPostResponse = subledgerMasteraccountService.createMasterAccount(request);
-        logger.info("Created Master Account for accountNumber: {}", masterAccountPostResponse.getMasterAccountId());
-        return ResponseEntity.ok(new CreateMasterAccountResponse(masterAccountPostResponse.getMasterAccountId()));
-    }
+Can you build the below PUT API?
 
-package com.sc.scroe.controller.advice;
+4.	PUT API for subledger_masteraccount table:
+URL: /v1/subledger/masteraccounts/{masteraccountid}/
 
-import com.sc.scroe.exception.ErrorResponse;
-import com.sc.scroe.exception.ResourceNotFoundException;
-import com.sc.scroe.shared.web.ApiWebConstants;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+Request:
+{
+  "updatedBy": "OPS_USER_001",
+  "updatedOn": "2026-07-07",
+   "oldValues": {
+    "masterAccountNumber": "0987654321",
+    "masterAccountCountry": "SG",
+    "masterAccountCurrencyCode": "SGD",
+    "masterAccountName": "XYZ Corporation",
+    "companyInitial": "SCB",
+    "clientType": "CORP",
+    "subAccountType": "CURRENT",
+     "productCode": "601,
+    "accountClassificationCode": "232053”,
+    "subKycCddFlag": false,
+    "subKycCddRiskCode": "LOW",
+    "subDefaultRiskCodeHoldFlag": false,
+    "subDefaultRiskCode": ["HOLD00"],
+    "masterAccountAddressInheritFlag": false,
+    "clientsMoney": "Y",
+    “infoCodeClientsMoney”:””,
+
+    "subAccountClosureOffset": 0,
+    "infoCode1": "SCR",
+   "infoValue1": "N"
+   "infoCode2": "WSC",
+   "infoValue2": "00"
+    "accountBranch": "065",
+    "consolidatedStatementFlag": false,
+    "glid": "8888888888",
+    "masterNumber": "3094100",
+    "accountCategory": "S",
+    "dsrClosingId": "DSR000",
+    "adviseInterestIndicator": "1",
+    "ibanNumber": "GB00NWBK00000000000000",
+    "closeDate": "2026-12-31",
+    "subProductCode": "CC",
+    "creditInterestCode": "01",
+    "debitInterestCode": "02",
+    "interestCode": "8888",
+    "suppressStatementFlag": false,
+    "creditSubAccountInterestToMasterAccount": false,
+    "maxSubAccountLimit": 50,
+    "openedOn": "2026-01-01",
+    "ebbsAccountStatus": "I"
+  },
+  "newValues": {
+    "masterAccountNumber": "1234567890",
+    "masterAccountCountry": "GB",
+    "masterAccountCurrencyCode": "GBP",
+    "masterAccountName": "ABC Corporation",
+    "companyInitial": "SCB",
+    "clientType": "IH",
+    "subAccountType": "SAVINGS",
+     "productCode": "601,
+    "accountClassificationCode": "232053”,
+    "subKycCddFlag": true,
+    "subKycCddRiskCode": "ABC",
+    "subDefaultRiskCodeHoldFlag": true,
+    "subDefaultRiskCode": ["HOLD01", "HOLD02"]
+    "masterAccountAddressInheritFlag": true,
+      "clientsMoney": "Y",
+    “infoCodeClientsMoney”:””,
+    "subAccountClosureOffset": 5,
+    "infoCode1": "SCR",
+   "infoValue1": "N"
+   "infoCode2": "WSC",
+   "infoValue2": "00"
+    "accountBranch": "066",
+    "consolidatedStatementFlag": true,
+    "glid": "9999999999",
+    "masterNumber": "3094154",
+    "accountCategory": "C",
+    "dsrClosingId": "DSR001",
+    "adviseInterestIndicator": "3",
+    "ibanNumber": "GB29NWBK60161331926819",
+    "closeDate": "2027-12-31",
+    "subProductCode": "DD",
+    "creditInterestCode": "00",
+    "debitInterestCode": "01",
+    "interestCode": "9999",
+    "suppressStatementFlag": true,
+    "creditSubAccountInterestToMasterAccount": true,
+    "creditInterestAccountNumber": "1234567890",
+    "creditInterestCurrencyCode": "GBP"
+    "maxSubAccountLimit": 99,
+    "openedOn": "2026-07-03",
+    "ebbsAccountStatus": "A"
+  }
+}
+
+Field Reference:
+
+Field	Type	Mandatory	Notes
+dealId	Path param string	Yes	Identifies the record
+clientId	Path param string	Yes	Identifies the record
+masterAccountNumber	string	Yes	 
+masterAccountCountry	string	Yes	 
+masterAccountCurrencyCode	string	Yes	 
+masterAccountName	string	Optional	 
+companyInitial	string	Optional	 
+clientType	string	Optional	 
+subAccountType	string	Optional	Manual input
+productCode	string	Optional	
+accountClassificationCode	string	Optional	
+subKycCddFlag	string	Optional	 
+subKycCddRiskCode	string	Optional	Single value only
+subDefaultRiskCodeHoldFlag	string	Optional	 
+subDefaultRiskCode	array of strings	Optional	Multiple hold codes; stored as comma-separated in DB
+masterAccountAddressInheritFlag	string	Optional	 
+clientsMoney	string	Optional	 
+infoCodeClientsMoney	String	Optional	
+subAccountClosureOffset	string	Optional	 
+infoCode1	string	Optional	 
+infoValue1	string	Optional	
+infoCode2	string	Optional	 
+infoValue2	string	Optional	
+accountBranch	string	Optional	 
+consolidatedStatementFlag	string	Optional	 
+glid	string	Optional	 
+masterNumber	string	Yes	 
+accountCategory	string	Optional	 
+dsrClosingId	string	Optional	 
+adviseInterestIndicator	string	Optional	 
+ibanNumber	string	Optional	 
+closeDate	string (date)	Optional	YYYY-MM-DD
+subProductCode	string	Optional	 
+creditInterestCode	string	Optional	 
+debitInterestCode	string	Optional	 
+interestCode	string	Optional	 
+suppressStatementFlag	string	Optional	 
+creditSubAccountInterestToMasterAccount	string	Optional	 
+maxSubAccountLimit	string	Optional	 
+openedOn	string (date)	Optional	YYYY-MM-DD
+ebbsAccountStatus	string	Optional	 
+
+Response:
+
+JSON	Data Type	Description
+200 OK		
+{		
+“dealId”:””	String	
+“clientId”:””	String	
+"masterAccountNumber":""	String	
+ "masterAccountCountry": "GB"	String	
+"masterAccountCurrencyCode": “GBP”	String	
+"message": "Master account setup updated successfully"	String	
+"masterAccountId":"MAS001"	String	Unique reference number of master account setup table
+}		
+
+404 Error		
+{		
+   "errors":[{		
+      "code": " ERR01",	String	Error code to classify the type of error
+      "description" :"No master account setup record found for the given masteraccountid"	String	Description of the error
+  }]		
+}		
+500 Error		
+{		
+   "errors":[{		
+      "code": " ERR01",	String	Error code to classify the type of error
+      "description" :"Technical Issue - Please contact the support team"	String	Description of the error
+   }]		
+}		
+
+Below is my exiting code for other api:
+package com.sc.scroe.masteraccount.service;
+
+import com.sc.scroe.exception.DuplicateResourceException;
+import com.sc.scroe.masteraccount.constant.MasterAccountConstants;
+import com.sc.scroe.masteraccount.dto.CreateMasterAccountRequest;
+import com.sc.scroe.masteraccount.dto.CreateMasterAccountResponse;
+import com.sc.scroe.masteraccount.dto.GetMasterAccountResponse;
+import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
+import com.sc.scroe.masteraccount.repository.MasterAccountRepository;
+
+import com.sc.scroe.masteraccount.specification.MasterAccountSpecification;
+import com.sc.scroe.pattern.service.PatternUtil;
+import com.sc.scroe.shared.util.DataIntegrityViolationParser;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.stereotype.Service;
 
-@RestControllerAdvice
-public class GlobalExceptionHandler {
+@Service
+public class MasterAccountServiceImpl implements MasterAccountService {
 
-    private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    @Autowired
+    MasterAccountRepository masteraccountRepository;
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
-        String details = ex.getBindingResult()
-                .getFieldErrors()
-                .stream()
-                .map(err -> err.getField() + ": " + err.getDefaultMessage())
-                .reduce((a, b) -> a + "; " + b)
-                .orElse(ex.getMessage());
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        Map<String, String> error = new LinkedHashMap<>();
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", details);
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(new ErrorResponse(Arrays.asList(error)));
+    @Autowired
+    MasterAccountUtil masterAccountUtil;
+
+    @Autowired
+    DataIntegrityViolationParser dataIntegrityViolationParser;
+
+    @Autowired
+    PatternUtil patternUtil;
+
+    @Override
+    public CreateMasterAccountResponse createMasterAccount(CreateMasterAccountRequest request) {
+        MasterAccountEntity entity = new MasterAccountEntity();
+        masterAccountUtil.mapPostRequestToEntity(request, entity);
+        MasterAccountEntity masteraccountEntity;
+        try {
+            masteraccountEntity = masteraccountRepository.save(entity);
+        } catch (DataIntegrityViolationException ex) {
+            if (dataIntegrityViolationParser.isDuplicateViolation(
+                    ex,
+                    MasterAccountConstants.MASTER_TABLE_NAME,
+                    MasterAccountConstants.MASTER_UNIQUE_COLUMNS)) {
+                throw new DuplicateResourceException(MasterAccountConstants.DUPLICATE_MASTER_MESSAGE);
+            }
+            throw ex;
+        }
+        return new CreateMasterAccountResponse(masteraccountEntity.getMasterNumber());
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ErrorResponse> handleBadRequest(IllegalArgumentException ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", ex.getMessage());
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(new ErrorResponse(Arrays.asList(error)));
-    }
+//    @Override
+//    public void updateMasterAccount(MasterAccountPutRequest request) {
+//        SubledgerMasteraccountEntity entity = subledgerMasteraccountRepository.findFirstByDealIdAndDeleteFlagFalse(request.getDealId()).orElseGet(SubledgerMasteraccountEntity::new);
+//        mapPutRequestToEntity(request, entity);
+//        subledgerMasteraccountRepository.save(entity);
+//    }
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", ex.getMessage());
-        return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(new ErrorResponse(Arrays.asList(error)));
-    }
-
-    @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ErrorResponse> handleResourceNotFound(DataIntegrityViolationException ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", ex.getMessage());
-        return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(new ErrorResponse(Arrays.asList(error)));
-    }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", "Technical Issue - Please contact the support team");
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new ErrorResponse(Arrays.asList(error)));
+    @Override
+    public GetMasterAccountResponse getMasterAccount(String dealId, String clientId, String masterAccountNumber, String masterAccountCountry, String masterAccountCurrencyCode, int page, int size) {
+        Pageable pageable = patternUtil.createPageable(page, size);
+        Specification<MasterAccountEntity> specification = MasterAccountSpecification.filterBy(clientId, dealId, masterAccountNumber, masterAccountCountry, masterAccountCurrencyCode);
+        Page<MasterAccountEntity> pageResult = masteraccountRepository.findAll(specification, pageable);
+        return masterAccountUtil.buildResponse(pageResult);
     }
 }
+
+package com.sc.scroe.masteraccount.service;
+
+import com.sc.scroe.masteraccount.dto.CreateMasterAccountRequest;
+import com.sc.scroe.masteraccount.dto.GetMasterAccountResponse;
+import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
+
+import org.springframework.data.domain.Page;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+public class MasterAccountUtil {
+
+    public GetMasterAccountResponse buildResponse(Page<MasterAccountEntity> pageResult) {
+        GetMasterAccountResponse response = new GetMasterAccountResponse();
+        response.setPage(pageResult.getNumber() + 1);
+        response.setPageCount(pageResult.getTotalPages());
+        response.setTotalCount(pageResult.getTotalElements());
+        response.setData(pageResult.getContent().stream()
+                .map(this::toMasterData)
+                .toList());
+        return response;
+    }
+
+    public GetMasterAccountResponse.MasterAccountData toMasterData(MasterAccountEntity entity) {
+        return new GetMasterAccountResponse.MasterAccountData(
+                entity.getDealId(),
+                entity.getClientId(),
+                entity.getAccountNumber(),
+                entity.getCountryCode(),
+                entity.getCurrencyCode(),
+                entity.getAccountName(),
+                entity.getCompanyInitial(),
+                entity.getClientType(),
+                entity.getAccountType(),
+                entity.getProductCode(),
+                entity.getClassificationCode(),
+                entity.getSubliteKycCddFlag(),
+                entity.getSubliteKycCddRiskCode(),
+                entity.getSubDefaultRiskCodeFlag(),
+                List.of(entity.getSubDefaultRiskCode().split(",")),
+                entity.getAddressInheritFlag(),
+                entity.getClientsMoney(),
+                entity.getClientsMoneyValue(),
+                entity.getSubAccountClosureOffset(),
+                entity.getInfoCode1(),
+                entity.getInfoValue1(),
+                entity.getInfoCode2(),
+                entity.getInfoValue2(),
+                entity.getAccountBranch(),
+                entity.getConsolidatedStatementFlag(),
+                entity.getGlid(),
+                entity.getMasterNumber(),
+                entity.getAccountCategory(),
+                entity.getDsrClosingId(),
+                entity.getAdviseInterestIndicator(),
+                entity.getIbanNumber(),
+                String.valueOf(entity.getAccountClosedDate()),
+                entity.getSubProductCode(),
+                entity.getCreditInterestCode(),
+                entity.getDebitInterestCode(),
+                entity.getInterestCode(),
+                entity.getSuppressStatementFlag(),
+                entity.getCreditSubAcctIntToMast(),
+                String.valueOf(entity.getMaxSubAccountLimit()),
+                String.valueOf(entity.getAccountOpenedDate()),
+                entity.getAccountStatus()
+        );
+    }
+
+    public void mapPostRequestToEntity(CreateMasterAccountRequest request, MasterAccountEntity entity) {
+        entity.setDealId(request.getDealId());
+        entity.setClientId(request.getClientId());
+
+        entity.setAccountNumber(request.getMasterAccountNumber());
+        entity.setCountryCode(request.getMasterAccountCountry());
+        entity.setCurrencyCode(request.getMasterAccountCurrencyCode());
+
+        entity.setAccountName(request.getMasterAccountName());
+        entity.setCompanyInitial(request.getCompanyInitial());
+
+        entity.setClientType(request.getClientType());
+
+        entity.setAccountType(request.getSubAccountType());
+
+        entity.setSubProductCode(request.getProductCode());
+
+        entity.setClassificationCode(request.getAccountClassificationCode());
+        entity.setProductCode(request.getProductCode());
+
+        entity.setSubliteKycCddFlag(request.getSubKycCddFlag());
+
+        entity.setSubliteKycCddRiskCode(request.getSubKycCddRiskCode());
+
+        entity.setSubDefaultRiskCodeFlag(request.getSubDefaultRiskCodeHoldFlag());
+
+        if (request.getSubDefaultRiskCode() != null && !request.getSubDefaultRiskCode().isEmpty()) {
+
+            entity.setSubDefaultRiskCode(String.join(",", request.getSubDefaultRiskCode()));
+        }
+
+        entity.setAddressInheritFlag(request.getMasterAccountAddressInheritFlag());
+
+        entity.setClientsMoney(request.getClientsMoney());
+
+        entity.setClientsMoneyValue(request.getInfoCodeClientsMoney());
+
+        entity.setSubAccountClosureOffset(request.getSubAccountClosureOffset());
+
+        entity.setInfoCode1(request.getInfoCode1());
+
+        entity.setInfoCode2(request.getInfoCode2());
+
+        entity.setInfoValue1(request.getInfoValue1());
+
+        entity.setInfoValue2(request.getInfoValue2());
+
+        entity.setAccountBranch(request.getAccountBranch());
+
+        entity.setConsolidatedStatementFlag(request.getConsolidatedStatementFlag());
+
+        entity.setGlid(request.getGlid());
+
+        entity.setMasterNumber(request.getMasterNumber());
+
+        entity.setAccountCategory(request.getAccountCategory());
+
+        entity.setDsrClosingId(request.getDsrClosingId());
+
+        entity.setAdviseInterestIndicator(request.getAdviseInterestIndicator());
+
+        entity.setIbanNumber(request.getIbanNumber());
+
+        entity.setAccountClosedDate(request.getCloseDate());
+
+        entity.setSubProductCode(request.getSubProductCode());
+
+        entity.setCreditInterestCode(request.getCreditInterestCode());
+
+        entity.setDebitInterestCode(request.getDebitInterestCode());
+
+        entity.setInterestCode(request.getInterestCode());
+
+        entity.setSuppressStatementFlag(request.getSuppressStatementFlag());
+
+        entity.setCreditSubAcctIntToMast(request.getCreditSubAccountInterestToMasterAccount());
+
+        entity.setMaxSubAccountLimit(request.getMaxSubAccountLimit());
+
+        entity.setAccountOpenedDate(request.getOpenedOn());
+
+        entity.setAccountStatus(request.getEbbsAccountStatus());
+    }
+}
+package com.sc.scroe.controller;
+
+import com.sc.scroe.masteraccount.dto.CreateMasterAccountRequest;
+import com.sc.scroe.masteraccount.dto.CreateMasterAccountResponse;
+import com.sc.scroe.masteraccount.dto.GetMasterAccountResponse;
+import com.sc.scroe.masteraccount.service.MasterAccountService;
+
+import com.sc.scroe.shared.web.NoRecordsResponseUtil;
+import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/v1/subledger/masteraccounts")
+public class MasterAccountController {
+
+    private static final Logger logger = LoggerFactory.getLogger(MasterAccountController.class);
+
+    @Autowired
+    MasterAccountService subledgerMasterAccountService;
+
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<CreateMasterAccountResponse> create(@Valid @RequestBody CreateMasterAccountRequest request) {
+        CreateMasterAccountResponse masterAccountPostResponse = subledgerMasterAccountService.createMasterAccount(request);
+        logger.info("Created Master Account for accountNumber: {}", masterAccountPostResponse.getMasterAccountId());
+        return new ResponseEntity<>(new CreateMasterAccountResponse(masterAccountPostResponse.getMasterAccountId()),
+                HttpStatus.CREATED);
+    }
+
+    //    @PutMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+//    public ResponseEntity<String> update(@RequestBody MasterAccountPutRequest request) {
+//        subledgerMasteraccountService.updateMasterAccount(request);
+//        return ResponseEntity.ok("SUCCESS");
+//    }
+//
+    @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> getMasterAccount(@RequestParam (value = "dealId", required = false) String dealId,
+                                              @RequestParam(value = "clientId", required = false) String clientId,
+                                              @RequestParam(value = "masterAccountNumber", required = false) String masterAccountNumber,
+                                              @RequestParam(value = "masterAccountCountry", required = false) String masterAccountCountry,
+                                              @RequestParam(value = "masterAccountCurrencyCode", required = false) String masterAccountCurrencyCode,
+                                              @RequestParam(value = "page", defaultValue = "1") Integer page,
+                                              @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize) {
+        GetMasterAccountResponse getMasterAccountResponse = subledgerMasterAccountService.getMasterAccount(dealId, clientId, masterAccountNumber, masterAccountCountry, masterAccountCurrencyCode, page, pageSize);
+        return NoRecordsResponseUtil.returnResponseOrThrowIfEmpty(
+                getMasterAccountResponse,
+                getMasterAccountResponse.getData(),
+                "No Master account records found",
+                NoRecordsResponseUtil.formatCriterion("dealId", dealId),
+                NoRecordsResponseUtil.formatCriterion("clientId", clientId),
+                NoRecordsResponseUtil.formatCriterion("masterAccountNumber", masterAccountNumber),
+                NoRecordsResponseUtil.formatCriterion("masterAccountCountry", masterAccountCountry),
+                NoRecordsResponseUtil.formatCriterion("masterAccountCurrencyCode", masterAccountCurrencyCode));
+    }
+}
+
+
