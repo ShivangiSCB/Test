@@ -1,299 +1,244 @@
 Can you implement Testcases for the below with 100% Line Coverage?
-package com.sc.scroe.masteraccount.constant;
+package com.sc.scroe.masteraccount.repository;
 
-public class MasterAccountConstants {
+import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
+import java.util.Optional;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
-    public enum AccountStatus {
+public interface MasterAccountRepository extends JpaRepository<MasterAccountEntity, Long>, JpaSpecificationExecutor<MasterAccountEntity> {
 
-        ACTIVE("A");
-        private final String value;
+    Optional<MasterAccountEntity> findFirstByDealIdAndDeleteFlagFalse(String dealId);
 
-        AccountStatus(String value) {
-            this.value = value;
-        }
-        public String getValue() {
-            return value;
-        }
+    Optional<MasterAccountEntity> findFirstByDealIdAndClientIdAndDeleteFlagFalse(String dealId, String clientId);
+}
+package com.sc.scroe.masteraccount.service;
+
+import com.sc.scroe.masteraccount.dto.CreateMasterAccountRequest;
+import com.sc.scroe.masteraccount.dto.GetMasterAccountResponse;
+import com.sc.scroe.masteraccount.dto.MasterAccountValuesDTO;
+import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
+
+import org.springframework.data.domain.Page;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+public class MasterAccountUtil {
+
+    public GetMasterAccountResponse buildResponse(Page<MasterAccountEntity> pageResult) {
+        GetMasterAccountResponse response = new GetMasterAccountResponse();
+        response.setPage(pageResult.getNumber() + 1);
+        response.setPageCount(pageResult.getTotalPages());
+        response.setTotalCount(pageResult.getTotalElements());
+        response.setData(pageResult.getContent().stream().map(this::toMasterData).toList());
+        return response;
     }
 
-    public static final String DUPLICATE_MASTER_MESSAGE = "Subledger Master Account with the same accountNumber, countryCode, and currencyCode already exists.";
-    public static final String MASTER_TABLE_NAME = "subledger_masteraccount";
-    public static final String[] MASTER_UNIQUE_COLUMNS = {
-            "account_number",
-            "country_code",
-            "currency_code",
-    };
-}
+    public GetMasterAccountResponse.MasterAccountData toMasterData(MasterAccountEntity entity) {
+        return new GetMasterAccountResponse.MasterAccountData(entity.getDealId(), entity.getClientId(), entity.getAccountNumber(), entity.getCountryCode(), entity.getCurrencyCode(), entity.getAccountName(), entity.getCompanyInitial(), entity.getClientType(), entity.getAccountType(), entity.getProductCode(), entity.getClassificationCode(), entity.getSubliteKycCddFlag(), entity.getSubliteKycCddRiskCode(), entity.getSubDefaultRiskCodeFlag(), List.of(entity.getSubDefaultRiskCode().split(",")), entity.getAddressInheritFlag(), entity.getClientsMoney(), entity.getClientsMoneyValue(), entity.getSubAccountClosureOffset(), entity.getInfoCode1(), entity.getInfoValue1(), entity.getInfoCode2(), entity.getInfoValue2(), entity.getAccountBranch(), entity.getConsolidatedStatementFlag(), entity.getGlid(), entity.getMasterNumber(), entity.getAccountCategory(), entity.getDsrClosingId(), entity.getAdviseInterestIndicator(), entity.getIbanNumber(), String.valueOf(entity.getAccountClosedDate()), entity.getSubProductCode(), entity.getCreditInterestCode(), entity.getDebitInterestCode(), entity.getInterestCode(), entity.getSuppressStatementFlag(), entity.getCreditSubAcctIntToMast(), String.valueOf(entity.getMaxSubAccountLimit()), String.valueOf(entity.getAccountOpenedDate()), entity.getAccountStatus());
+    }
 
-package com.sc.scroe.masteraccount.dto;
+    public void mapPostRequestToEntity(CreateMasterAccountRequest request, MasterAccountEntity entity) {
+        entity.setDealId(request.getDealId());
+        entity.setClientId(request.getClientId());
 
-import com.fasterxml.jackson.annotation.JsonFormat;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
+        entity.setAccountNumber(request.getMasterAccountNumber());
+        entity.setCountryCode(request.getMasterAccountCountry());
+        entity.setCurrencyCode(request.getMasterAccountCurrencyCode());
 
-import java.time.LocalDate;
-import java.util.List;
+        entity.setAccountName(request.getMasterAccountName());
+        entity.setCompanyInitial(request.getCompanyInitial());
 
-@Data
-public class CreateMasterAccountRequest {
+        entity.setClientType(request.getClientType());
 
-    @NotBlank
-    private String dealId;
+        entity.setAccountType(request.getSubAccountType());
 
-    @NotBlank
-    private String clientId;
+        entity.setSubProductCode(request.getProductCode());
 
-    @NotBlank
-    private String masterAccountNumber;
+        entity.setClassificationCode(request.getAccountClassificationCode());
+        entity.setProductCode(request.getProductCode());
 
-    @NotBlank
-    private String masterAccountCountry;
+        entity.setSubliteKycCddFlag(request.getSubKycCddFlag());
 
-    @NotBlank
-    private String masterAccountCurrencyCode;
+        entity.setSubliteKycCddRiskCode(request.getSubKycCddRiskCode());
 
-    private String masterAccountName;
+        entity.setSubDefaultRiskCodeFlag(request.getSubDefaultRiskCodeHoldFlag());
 
-    private String companyInitial;
+        if (request.getSubDefaultRiskCode() != null && !request.getSubDefaultRiskCode().isEmpty()) {
 
-    private String clientType;
+            entity.setSubDefaultRiskCode(String.join(",", request.getSubDefaultRiskCode()));
+        }
 
-    // Manual Input
-    private String subAccountType;
+        entity.setAddressInheritFlag(request.getMasterAccountAddressInheritFlag());
 
-    private String productCode;
+        entity.setClientsMoney(request.getClientsMoney());
 
-    private String accountClassificationCode;
+        entity.setClientsMoneyValue(request.getInfoCodeClientsMoney());
 
-    private String subKycCddFlag;
+        entity.setSubAccountClosureOffset(request.getSubAccountClosureOffset());
 
-    private String subKycCddRiskCode;
+        entity.setInfoCode1(request.getInfoCode1());
 
-    private String subDefaultRiskCodeHoldFlag;
+        entity.setInfoCode2(request.getInfoCode2());
 
-    private List<String> subDefaultRiskCode;
+        entity.setInfoValue1(request.getInfoValue1());
 
-    private String masterAccountAddressInheritFlag;
+        entity.setInfoValue2(request.getInfoValue2());
 
-    private String clientsMoney;
+        entity.setAccountBranch(request.getAccountBranch());
 
-    // maps to clients_money_value
-    private String infoCodeClientsMoney;
+        entity.setConsolidatedStatementFlag(request.getConsolidatedStatementFlag());
 
-    private String subAccountClosureOffset;
+        entity.setGlid(request.getGlid());
 
-    private String accountBranch;
+        entity.setMasterNumber(request.getMasterNumber());
 
-    private String consolidatedStatementFlag;
+        entity.setAccountCategory(request.getAccountCategory());
 
-    private String glid;
+        entity.setDsrClosingId(request.getDsrClosingId());
 
-    @NotBlank
-    private String masterNumber;
+        entity.setAdviseInterestIndicator(request.getAdviseInterestIndicator());
 
-    private String accountCategory;
+        entity.setIbanNumber(request.getIbanNumber());
 
-    private String dsrClosingId;
+        entity.setAccountClosedDate(request.getCloseDate());
 
-    private String adviseInterestIndicator;
+        entity.setSubProductCode(request.getSubProductCode());
 
-    private String ibanNumber;
+        entity.setCreditInterestCode(request.getCreditInterestCode());
 
-    @JsonFormat(pattern = "yyyy-MM-dd")
-    private LocalDate closeDate;
+        entity.setDebitInterestCode(request.getDebitInterestCode());
 
-    private String subProductCode;
+        entity.setInterestCode(request.getInterestCode());
 
-    private String creditInterestCode;
+        entity.setSuppressStatementFlag(request.getSuppressStatementFlag());
 
-    private String debitInterestCode;
+        entity.setCreditSubAcctIntToMast(request.getCreditSubAccountInterestToMasterAccount());
 
-    private String interestCode;
+        entity.setMaxSubAccountLimit(request.getMaxSubAccountLimit());
 
-    private String suppressStatementFlag;
+        entity.setAccountOpenedDate(request.getOpenedOn());
 
-    private String creditSubAccountInterestToMasterAccount;
+        entity.setAccountStatus(request.getEbbsAccountStatus());
+    }
 
-    private Integer maxSubAccountLimit;
+    public void mapPutRequestToEntity(MasterAccountValuesDTO request, MasterAccountEntity entity) {
 
-    @JsonFormat(pattern = "yyyy-MM-dd")
-    private LocalDate openedOn;
+        entity.setAccountNumber(request.getMasterAccountNumber());
+        entity.setCountryCode(request.getMasterAccountCountry());
+        entity.setCurrencyCode(request.getMasterAccountCurrencyCode());
+        entity.setAccountName(request.getMasterAccountName());
+        entity.setCompanyInitial(request.getCompanyInitial());
+        entity.setClientType(request.getClientType());
+        entity.setAccountType(request.getSubAccountType());
+        entity.setProductCode(request.getProductCode());
 
-    private String ebbsAccountStatus;
+        entity.setClassificationCode(request.getAccountClassificationCode());
 
-    private String infoCode1;
+        entity.setSubliteKycCddFlag(request.getSubKycCddFlag());
 
-    private String infoValue1;
+        entity.setSubliteKycCddRiskCode(request.getSubKycCddRiskCode());
 
-    private String infoCode2;
+        entity.setSubDefaultRiskCodeFlag(request.getSubDefaultRiskCodeHoldFlag());
 
-    private String infoValue2;
-}
-package com.sc.scroe.masteraccount.dto;
+        entity.setSubDefaultRiskCode(request.getSubDefaultRiskCode() == null ? null : String.join(",", request.getSubDefaultRiskCode()));
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+        entity.setAddressInheritFlag(request.getMasterAccountAddressInheritFlag());
 
-@Data
-@AllArgsConstructor
-@NoArgsConstructor
-public class CreateMasterAccountResponse {
+        entity.setClientsMoney(request.getClientsMoney());
 
-    private String masterAccountId;
-}
-package com.sc.scroe.masteraccount.dto;
+        entity.setClientsMoneyValue(request.getInfoCodeClientsMoney());
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+        entity.setSubAccountClosureOffset(String.valueOf(request.getSubAccountClosureOffset()));
 
-import java.util.List;
+        entity.setInfoCode1(request.getInfoCode1());
+        entity.setInfoValue1(request.getInfoValue1());
 
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class GetMasterAccountResponse {
-    private Integer page;
-    private Integer pageCount;
-    private Long totalCount;
-    private List<MasterAccountData> data;
+        entity.setInfoCode2(request.getInfoCode2());
+        entity.setInfoValue2(request.getInfoValue2());
 
-    /**
-     * Fields returned for each item under the pattern GET API data array.
-     */
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class MasterAccountData {
-        private String dealId;
-        private String clientId;
-        private String masterAccountNumber;
-        private String masterAccountCountry;
-        private String masterAccountCurrencyCode;
-        private String masterAccountName;
-        private String companyInitial;
-        private String clientType;
-        private String subAccountType;
-        private String productCode;
-        private String accountClassificationCode;
-        private String subKycCddFlag;
-        private String subKycCddRiskCode;
-        private String subDefaultRiskCodeHoldFlag;
-        private List<String> subDefaultRiskCode;
-        private String masterAccountAddressInheritFlag;
-        private String clientsMoney;
-        private String infoCodeClientsMoney;
-        private String subAccountClosureOffset;
-        private String infoCode1;
-        private String infoValue1;
-        private String infoCode2;
-        private String infoValue2;
-        private String accountBranch;
-        private String consolidatedStatementFlag;
-        private String glid;
-        private String masterNumber;
-        private String accountCategory;
-        private String dsrClosingId;
-        private String adviseInterestIndicator;
-        private String ibanNumber;
-        private String closeDate;
-        private String subProductCode;
-        private String creditInterestCode;
-        private String debitInterestCode;
-        private String interestCode;
-        private String suppressStatementFlag;
-        private String creditSubAccountInterestToMasterAccount;
-        private String maxSubAccountLimit;
-        private String OpenedOn;
-        private String ebbsAccountStatus;
+        entity.setAccountBranch(request.getAccountBranch());
+
+        entity.setConsolidatedStatementFlag(request.getConsolidatedStatementFlag());
+
+        entity.setGlid(request.getGlid());
+
+        entity.setMasterNumber(request.getMasterNumber());
+
+        entity.setAccountCategory(request.getAccountCategory());
+
+        entity.setDsrClosingId(request.getDsrClosingId());
+
+        entity.setAdviseInterestIndicator(request.getAdviseInterestIndicator());
+
+        entity.setIbanNumber(request.getIbanNumber());
+
+        entity.setAccountClosedDate(request.getCloseDate());
+
+        entity.setSubProductCode(request.getSubProductCode());
+
+        entity.setCreditInterestCode(request.getCreditInterestCode());
+
+        entity.setDebitInterestCode(request.getDebitInterestCode());
+
+        entity.setInterestCode(request.getInterestCode());
+
+        entity.setSuppressStatementFlag(request.getSuppressStatementFlag());
+
+        entity.setCreditSubAcctIntToMast(request.getCreditSubAccountInterestToMasterAccount());
+
+        entity.setMaxSubAccountLimit(request.getMaxSubAccountLimit());
+
+        entity.setAccountOpenedDate(request.getOpenedOn());
+
+        entity.setAccountStatus(request.getEbbsAccountStatus());
+
+        entity.setCreditInterestAccountNumber(request.getCreditInterestAccountNumber());
+
+        entity.setCreditInterestCurrencyCode(request.getCreditInterestCurrencyCode());
     }
 }
-package com.sc.scroe.masteraccount.dto;
+package com.sc.scroe.masteraccount.specification;
 
-import lombok.Getter;
-import lombok.Setter;
+import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
+import jakarta.persistence.criteria.Predicate;
+import org.springframework.data.jpa.domain.Specification;
 
-import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
-@Getter
-@Setter
-public class MasterAccountValuesDTO {
-    private String masterAccountNumber;
-    private String masterAccountCountry;
-    private String masterAccountCurrencyCode;
-    private String masterAccountName;
-    private String companyInitial;
-    private String clientType;
-    private String subAccountType;
-    private String productCode;
-    private String accountClassificationCode;
-    private String subKycCddFlag;
-    private String subKycCddRiskCode;
-    private String subDefaultRiskCodeHoldFlag;
-    private List<String> subDefaultRiskCode;
-    private String masterAccountAddressInheritFlag;
-    private String clientsMoney;
-    private String infoCodeClientsMoney;
-    private Integer subAccountClosureOffset;
-    private String infoCode1;
-    private String infoValue1;
-    private String infoCode2;
-    private String infoValue2;
-    private String accountBranch;
-    private String consolidatedStatementFlag;
-    private String glid;
-    private String masterNumber;
-    private String accountCategory;
-    private String dsrClosingId;
-    private String adviseInterestIndicator;
-    private String ibanNumber;
-    private LocalDate closeDate;
-    private String subProductCode;
-    private String creditInterestCode;
-    private String debitInterestCode;
-    private String interestCode;
-    private String suppressStatementFlag;
-    private String creditSubAccountInterestToMasterAccount;
-    private String creditInterestAccountNumber;
-    private String creditInterestCurrencyCode;
-    private Integer maxSubAccountLimit;
-    private LocalDate openedOn;
-    private String ebbsAccountStatus;
-}
-package com.sc.scroe.masteraccount.dto;
+public class MasterAccountSpecification {
 
-import lombok.Getter;
-import lombok.Setter;
-import java.time.LocalDateTime;
+    public static Specification<MasterAccountEntity> filterBy(String clientId, String dealId, String masterAccountNumber, String masterAccountCountry, String masterAccountCurrencyCode) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
 
-@Getter
-@Setter
-public class UpdateMasterAccountRequest {
-    private String updatedBy;
-    private LocalDateTime updatedOn;
-    private MasterAccountValuesDTO oldValues;
-    private MasterAccountValuesDTO newValues;
-}
-package com.sc.scroe.masteraccount.dto;
+            // Always fetch only non-deleted records
+            predicates.add(cb.isFalse(root.get("deleteFlag")));
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+            if (clientId != null && !clientId.isBlank()) {
+                predicates.add(cb.equal(root.get("clientId"), clientId.trim()));
+            }
 
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
-public class UpdateMasterAccountResponse {
+            if (dealId != null && !dealId.isBlank()) {
+                predicates.add(cb.equal(root.get("dealId"), dealId.trim()));
+            }
 
-    private String dealId;
-    private String clientId;
-    private String masterAccountNumber;
-    private String masterAccountCountry;
-    private String masterAccountCurrencyCode;
-    private String message;
-    private String masterAccountId;
+            if (masterAccountNumber != null && !masterAccountNumber.isBlank()) {
+                predicates.add(cb.equal(root.get("accountNumber"), masterAccountNumber.trim()));
+            }
+
+            if (masterAccountCountry != null && !masterAccountCountry.isBlank()) {
+                predicates.add(cb.equal(root.get("countryCode"), masterAccountCountry.trim()));
+            }
+
+            if (masterAccountCurrencyCode != null && !masterAccountCurrencyCode.isBlank()) {
+                predicates.add(cb.equal(root.get("currencyCode"), masterAccountCurrencyCode.trim()));
+            }
+
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+    }
 }
