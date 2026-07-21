@@ -1,80 +1,148 @@
 Can you implement Testcases for the below with 100% Line Coverage?
-package com.sc.scroe.controller;
+package com.sc.scroe.masteraccount.constant;
 
-import com.sc.scroe.pattern.dto.CreatePatternRequest;
-import com.sc.scroe.pattern.dto.CreatePatternResponse;
-import com.sc.scroe.pattern.dto.GetPatternsResponse;
-import com.sc.scroe.pattern.service.PatternService;
-import com.sc.scroe.shared.web.NoRecordsResponseUtil;
-import jakarta.validation.Valid;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+public class MasterAccountConstants {
 
-@RestController
-@RequestMapping("/v1/subledger/patterns")
-public class PatternController {
+    public enum AccountStatus {
 
-    private static final Logger logger = LoggerFactory.getLogger(PatternController.class);
+        ACTIVE("A");
+        private final String value;
 
-    @Autowired
-    PatternService patternService;
-
-    @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<GetPatternsResponse> getPattern(
-            @RequestParam(value = "clientId", required = false) String clientId,
-            @RequestParam(value = "dealId", required = false) String dealId,
-            @RequestParam(value = "patternType", required = false) String patternType,
-            @RequestParam(value = "page", defaultValue = "1") Integer page,
-            @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize) {
-        GetPatternsResponse response = patternService.getPattern(clientId, dealId, patternType, page,
-                pageSize);
-        return NoRecordsResponseUtil.returnResponseOrThrowIfEmpty(
-                response,
-                response.getData(),
-                "No subledger pattern records found",
-                NoRecordsResponseUtil.formatCriterion("clientId", clientId),
-                NoRecordsResponseUtil.formatCriterion("dealId", dealId),
-                NoRecordsResponseUtil.formatCriterion("patternType", patternType));
+        AccountStatus(String value) {
+            this.value = value;
+        }
+        public String getValue() {
+            return value;
+        }
     }
 
-    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<CreatePatternResponse> createPattern(
-            @Valid @RequestBody CreatePatternRequest request) {
-        Long patternId = patternService.createPattern(request);
-        logger.info("Created subledger pattern with patternId={}", patternId);
-        return new  ResponseEntity<>(new CreatePatternResponse(patternId),HttpStatus.CREATED);
-    }
+    public static final String DUPLICATE_MASTER_MESSAGE = "Subledger Master Account with the same accountNumber, countryCode, and currencyCode already exists.";
+    public static final String MASTER_TABLE_NAME = "subledger_masteraccount";
+    public static final String[] MASTER_UNIQUE_COLUMNS = {
+            "account_number",
+            "country_code",
+            "currency_code",
+    };
 }
 
-package com.sc.scroe.pattern.dto;
+package com.sc.scroe.masteraccount.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
+import java.time.LocalDate;
+import java.util.List;
+
 @Data
-public class CreatePatternRequest {
+public class CreateMasterAccountRequest {
 
-    @NotBlank(message = "client id is required")
-    private String clientId;
-
-    @NotBlank(message = "deal id is required")
+    @NotBlank
     private String dealId;
 
-    @NotBlank(message = "pattern type is required")
-    private String patternType;
-}
+    @NotBlank
+    private String clientId;
 
-package com.sc.scroe.pattern.dto;
+    @NotBlank
+    private String masterAccountNumber;
+
+    @NotBlank
+    private String masterAccountCountry;
+
+    @NotBlank
+    private String masterAccountCurrencyCode;
+
+    private String masterAccountName;
+
+    private String companyInitial;
+
+    private String clientType;
+
+    // Manual Input
+    private String subAccountType;
+
+    private String productCode;
+
+    private String accountClassificationCode;
+
+    private String subKycCddFlag;
+
+    private String subKycCddRiskCode;
+
+    private String subDefaultRiskCodeHoldFlag;
+
+    private List<String> subDefaultRiskCode;
+
+    private String masterAccountAddressInheritFlag;
+
+    private String clientsMoney;
+
+    // maps to clients_money_value
+    private String infoCodeClientsMoney;
+
+    private String subAccountClosureOffset;
+
+    private String accountBranch;
+
+    private String consolidatedStatementFlag;
+
+    private String glid;
+
+    @NotBlank
+    private String masterNumber;
+
+    private String accountCategory;
+
+    private String dsrClosingId;
+
+    private String adviseInterestIndicator;
+
+    private String ibanNumber;
+
+    @JsonFormat(pattern = "yyyy-MM-dd")
+    private LocalDate closeDate;
+
+    private String subProductCode;
+
+    private String creditInterestCode;
+
+    private String debitInterestCode;
+
+    private String interestCode;
+
+    private String suppressStatementFlag;
+
+    private String creditSubAccountInterestToMasterAccount;
+
+    private Integer maxSubAccountLimit;
+
+    @JsonFormat(pattern = "yyyy-MM-dd")
+    private LocalDate openedOn;
+
+    private String ebbsAccountStatus;
+
+    private String infoCode1;
+
+    private String infoValue1;
+
+    private String infoCode2;
+
+    private String infoValue2;
+}
+package com.sc.scroe.masteraccount.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class CreateMasterAccountResponse {
+
+    private String masterAccountId;
+}
+package com.sc.scroe.masteraccount.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -85,11 +153,11 @@ import java.util.List;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class GetPatternsResponse {
+public class GetMasterAccountResponse {
     private Integer page;
     private Integer pageCount;
     private Long totalCount;
-    private List<PatternData> data;
+    private List<MasterAccountData> data;
 
     /**
      * Fields returned for each item under the pattern GET API data array.
@@ -97,119 +165,646 @@ public class GetPatternsResponse {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class PatternData {
-        private Long patternId;
-        private String clientId;
+    public static class MasterAccountData {
         private String dealId;
-        private String patternType;
+        private String clientId;
+        private String masterAccountNumber;
+        private String masterAccountCountry;
+        private String masterAccountCurrencyCode;
+        private String masterAccountName;
+        private String companyInitial;
+        private String clientType;
+        private String subAccountType;
+        private String productCode;
+        private String accountClassificationCode;
+        private String subKycCddFlag;
+        private String subKycCddRiskCode;
+        private String subDefaultRiskCodeHoldFlag;
+        private List<String> subDefaultRiskCode;
+        private String masterAccountAddressInheritFlag;
+        private String clientsMoney;
+        private String infoCodeClientsMoney;
+        private String subAccountClosureOffset;
+        private String infoCode1;
+        private String infoValue1;
+        private String infoCode2;
+        private String infoValue2;
+        private String accountBranch;
+        private String consolidatedStatementFlag;
+        private String glid;
+        private String masterNumber;
+        private String accountCategory;
+        private String dsrClosingId;
+        private String adviseInterestIndicator;
+        private String ibanNumber;
+        private String closeDate;
+        private String subProductCode;
+        private String creditInterestCode;
+        private String debitInterestCode;
+        private String interestCode;
+        private String suppressStatementFlag;
+        private String creditSubAccountInterestToMasterAccount;
+        private String maxSubAccountLimit;
+        private String OpenedOn;
+        private String ebbsAccountStatus;
     }
 }
+package com.sc.scroe.masteraccount.dto;
 
-package com.sc.scroe.pattern.dto;
+import lombok.Getter;
+import lombok.Setter;
+
+import java.time.LocalDate;
+import java.util.List;
+
+@Getter
+@Setter
+public class MasterAccountValuesDTO {
+    private String masterAccountNumber;
+    private String masterAccountCountry;
+    private String masterAccountCurrencyCode;
+    private String masterAccountName;
+    private String companyInitial;
+    private String clientType;
+    private String subAccountType;
+    private String productCode;
+    private String accountClassificationCode;
+    private String subKycCddFlag;
+    private String subKycCddRiskCode;
+    private String subDefaultRiskCodeHoldFlag;
+    private List<String> subDefaultRiskCode;
+    private String masterAccountAddressInheritFlag;
+    private String clientsMoney;
+    private String infoCodeClientsMoney;
+    private Integer subAccountClosureOffset;
+    private String infoCode1;
+    private String infoValue1;
+    private String infoCode2;
+    private String infoValue2;
+    private String accountBranch;
+    private String consolidatedStatementFlag;
+    private String glid;
+    private String masterNumber;
+    private String accountCategory;
+    private String dsrClosingId;
+    private String adviseInterestIndicator;
+    private String ibanNumber;
+    private LocalDate closeDate;
+    private String subProductCode;
+    private String creditInterestCode;
+    private String debitInterestCode;
+    private String interestCode;
+    private String suppressStatementFlag;
+    private String creditSubAccountInterestToMasterAccount;
+    private String creditInterestAccountNumber;
+    private String creditInterestCurrencyCode;
+    private Integer maxSubAccountLimit;
+    private LocalDate openedOn;
+    private String ebbsAccountStatus;
+}
+package com.sc.scroe.masteraccount.dto;
+
+import lombok.Getter;
+import lombok.Setter;
+import java.time.LocalDateTime;
+
+@Getter
+@Setter
+public class UpdateMasterAccountRequest {
+    private String updatedBy;
+    private LocalDateTime updatedOn;
+    private MasterAccountValuesDTO oldValues;
+    private MasterAccountValuesDTO newValues;
+}
+package com.sc.scroe.masteraccount.dto;
 
 import lombok.AllArgsConstructor;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class CreatePatternResponse {
-    private Long patternId;
-}
+public class UpdateMasterAccountResponse {
 
-package com.sc.scroe.controller.advice;
+    private String dealId;
+    private String clientId;
+    private String masterAccountNumber;
+    private String masterAccountCountry;
+    private String masterAccountCurrencyCode;
+    private String message;
+    private String masterAccountId;
+}
+package com.sc.scroe.masteraccount.entity;
+
+import com.sc.scroe.shared.entity.SharedEntity;
+import jakarta.persistence.*;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
+import lombok.Data;
+
+@Data
+@Entity
+@Table(name = "subledger_masteraccount")
+public class MasterAccountEntity extends SharedEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "subledger_masteraccount_seq")
+    @SequenceGenerator(name = "subledger_masteraccount_seq", sequenceName = "subledger_masteraccount_seq", allocationSize = 1)
+    @Column(name = "masteraccount_id", nullable = false)
+    private Long masteraccountId;
+
+    @Column(name = "master_number", nullable = false, length = 30)
+    private String masterNumber;
+
+    @Column(name = "client_id", nullable = false, length = 100)
+    private String clientId;
+
+    @Column(name = "deal_id", nullable = false, length = 30)
+    private String dealId;
+
+    @Column(name = "account_number", nullable = false, length = 30)
+    private String accountNumber;
+
+    @Column(name = "country_code", nullable = false, length = 2)
+    private String countryCode;
+
+    @Column(name = "currency_code", nullable = false, length = 3)
+    private String currencyCode;
+
+    @Column(name = "account_branch", length = 20)
+    private String accountBranch;
+
+    @Column(name = "company_initial", length = 5)
+    private String companyInitial;
+
+    @Column(name = "account_name", length = 110)
+    private String accountName;
+
+    @Column(name = "iban_number", length = 34)
+    private String ibanNumber;
+
+    @Column(name = "account_status", length = 1)
+    private String accountStatus;
+
+    @Column(name = "account_opened_date")
+    private LocalDate accountOpenedDate;
+
+    @Column(name = "account_closed_date")
+    private LocalDate accountClosedDate;
+
+    @Column(name = "client_type", nullable = false, length = 10)
+    private String clientType;
+
+    @Column(name = "account_type", nullable = false, length = 20)
+    private String accountType;
+
+    @Column(name = "sub_product_code", length = 20)
+    private String subProductCode;
+
+    @Column(name = "product_code", length = 20)
+    private String productCode;
+
+    @Column(name = "max_sub_account_limit")
+    private Integer maxSubAccountLimit;
+
+    @Column(name = "classification_code", length = 20)
+    private String classificationCode;
+
+    @Column(name = "sublite_kyc_cdd_flag", nullable = false, length = 1)
+    private String subliteKycCddFlag;
+
+    @Column(name = "sublite_kyc_cdd_risk_code", length = 255)
+    private String subliteKycCddRiskCode;
+
+    @Column(name = "sub_default_risk_code_flag", nullable = false, length = 1)
+    private String subDefaultRiskCodeFlag;
+
+    @Column(name = "sub_default_risk_code", length = 255)
+    private String subDefaultRiskCode;
+
+    @Column(name = "address_inherit_flag", nullable = false, length = 1)
+    private String addressInheritFlag;
+
+    @Column(name = "clients_money", nullable = false, length = 1)
+    private String clientsMoney;
+
+    @Column(name = "sub_account_closure_offset", nullable = false, length = 1)
+    private String subAccountClosureOffset;
+
+    @Column(name = "glid", length = 30)
+    private String glid;
+
+    @Column(name = "consolidated_statement_flag", length = 1)
+    private String consolidatedStatementFlag;
+
+    @Column(name = "account_category", length = 20)
+    private String accountCategory;
+
+    @Column(name = "dsr_closing_id", length = 20)
+    private String dsrClosingId;
+
+    @Column(name = "advise_interest_indicator", length = 1)
+    private String adviseInterestIndicator;
+
+    @Column(name = "credit_sub_acct_int_to_mast", nullable = false, length = 1)
+    private String creditSubAcctIntToMast;
+
+    @Column(name = "credit_interest_code", length = 20)
+    private String creditInterestCode;
+
+    @Column(name = "debit_interest_code", length = 20)
+    private String debitInterestCode;
+
+    @Column(name = "suppress_statement_flag", nullable = false, length = 1)
+    private String suppressStatementFlag;
+
+    @Column(name = "interest_code", nullable = false, length = 20)
+    private String interestCode;
+
+    @Column(name = "credit_interest_account_number", length = 40)
+    private String creditInterestAccountNumber;
+
+    @Column(name = "credit_interest_currency_code", length = 3)
+    private String creditInterestCurrencyCode;
+
+    @Column(name = "clients_money_value", length = 99)
+    private String clientsMoneyValue;
+
+    @Column(name = "info_code1", length = 3)
+    private String infoCode1;
+
+    @Column(name = "info_value1", length = 99)
+    private String infoValue1;
+
+    @Column(name = "info_code2", length = 3)
+    private String infoCode2;
+
+    @Column(name = "info_value2", length = 99)
+    private String infoValue2;
+
+    @Column(name = "delete_flag", nullable = false)
+    private boolean deleteFlag = false;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        LocalDateTime now = LocalDateTime.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
+    }
+}
+package com.sc.scroe.masteraccount.repository;
+
+import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
+import java.util.Optional;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+
+public interface MasterAccountRepository extends JpaRepository<MasterAccountEntity, Long>, JpaSpecificationExecutor<MasterAccountEntity> {
+
+    Optional<MasterAccountEntity> findFirstByDealIdAndDeleteFlagFalse(String dealId);
+
+    Optional<MasterAccountEntity> findFirstByDealIdAndClientIdAndDeleteFlagFalse(String dealId, String clientId);
+}
+package com.sc.scroe.masteraccount.service;
+
+import com.sc.scroe.masteraccount.dto.*;
+
+public interface MasterAccountService {
+
+    CreateMasterAccountResponse createMasterAccount(CreateMasterAccountRequest request);
+
+    GetMasterAccountResponse getMasterAccount(String dealId, String clientId, String masterAccountNumber, String masterAccountCountry, String masterAccountCurrencyCode, int page, int size);
+
+    UpdateMasterAccountResponse updateMasterAccount(
+            Long masterAccountId,
+            UpdateMasterAccountRequest request);
+}
+package com.sc.scroe.masteraccount.service;
 
 import com.sc.scroe.exception.DuplicateResourceException;
-import com.sc.scroe.exception.ErrorResponse;
 import com.sc.scroe.exception.ResourceNotFoundException;
+import com.sc.scroe.masteraccount.constant.MasterAccountConstants;
+import com.sc.scroe.masteraccount.dto.*;
+import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
+import com.sc.scroe.masteraccount.repository.MasterAccountRepository;
+
+import com.sc.scroe.masteraccount.specification.MasterAccountSpecification;
+import com.sc.scroe.pattern.service.PatternUtil;
+import com.sc.scroe.shared.util.DataIntegrityViolationParser;
 import com.sc.scroe.shared.web.ApiWebConstants;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.stereotype.Service;
 
-@RestControllerAdvice
-public class GlobalExceptionHandler {
+import java.time.LocalDateTime;
 
-    private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+@Service
+public class MasterAccountServiceImpl implements MasterAccountService {
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
-        String details = ex.getBindingResult()
-                .getFieldErrors()
-                .stream()
-                .map(err -> err.getField() + ": " + err.getDefaultMessage())
-                .reduce((a, b) -> a + "; " + b)
-                .orElse(ex.getMessage());
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        Map<String, String> error = new LinkedHashMap<>();
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", details);
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(new ErrorResponse(Arrays.asList(error)));
+    @Autowired
+    MasterAccountRepository masteraccountRepository;
+
+    @Autowired
+    MasterAccountUtil masterAccountUtil;
+
+    @Autowired
+    DataIntegrityViolationParser dataIntegrityViolationParser;
+
+    @Autowired
+    PatternUtil patternUtil;
+
+    @Override
+    public CreateMasterAccountResponse createMasterAccount(CreateMasterAccountRequest request) {
+        MasterAccountEntity entity = new MasterAccountEntity();
+        masterAccountUtil.mapPostRequestToEntity(request, entity);
+        MasterAccountEntity masteraccountEntity;
+        try {
+            masteraccountEntity = masteraccountRepository.save(entity);
+        } catch (DataIntegrityViolationException ex) {
+            if (dataIntegrityViolationParser.isDuplicateViolation(ex, MasterAccountConstants.MASTER_TABLE_NAME, MasterAccountConstants.MASTER_UNIQUE_COLUMNS)) {
+                throw new DuplicateResourceException(MasterAccountConstants.DUPLICATE_MASTER_MESSAGE);
+            }
+            throw ex;
+        }
+        return new CreateMasterAccountResponse(masteraccountEntity.getMasterNumber());
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ErrorResponse> handleBadRequest(IllegalArgumentException ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", ex.getMessage());
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(new ErrorResponse(Arrays.asList(error)));
+    @Override
+    public UpdateMasterAccountResponse updateMasterAccount(Long masterAccountId, UpdateMasterAccountRequest request) {
+
+        MasterAccountEntity entity = masteraccountRepository.findById(masterAccountId).orElseThrow(() -> new ResourceNotFoundException("No master account setup record found for the given masteraccountid", ApiWebConstants.API_COMMON_ERROR_CODE));
+        masterAccountUtil.mapPutRequestToEntity(request.getNewValues(), entity);
+        entity.setUpdatedAt(LocalDateTime.now()); //Check and remove if not required
+
+        try {
+            masteraccountRepository.save(entity);
+        } catch (DataIntegrityViolationException ex) {
+            if (dataIntegrityViolationParser.isDuplicateViolation(ex, MasterAccountConstants.MASTER_TABLE_NAME, MasterAccountConstants.MASTER_UNIQUE_COLUMNS)) {
+                throw new DuplicateResourceException(MasterAccountConstants.DUPLICATE_MASTER_MESSAGE);
+            }
+            throw ex;
+        }
+        return new UpdateMasterAccountResponse(entity.getDealId(), entity.getClientId(), entity.getAccountNumber(), entity.getCountryCode(), entity.getCurrencyCode(), "Master account setup updated successfully", entity.getMasterNumber());
     }
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", ex.getMessage());
-        return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(new ErrorResponse(Arrays.asList(error)));
+    @Override
+    public GetMasterAccountResponse getMasterAccount(String dealId, String clientId, String masterAccountNumber, String masterAccountCountry, String masterAccountCurrencyCode, int page, int size) {
+        Pageable pageable = patternUtil.createPageable(page, size);
+        Specification<MasterAccountEntity> specification =
+                MasterAccountSpecification.filterBy(clientId,
+                        dealId, masterAccountNumber,
+                        masterAccountCountry,
+                        masterAccountCurrencyCode);
+        Page<MasterAccountEntity> pageResult = masteraccountRepository.findAll(specification, pageable);
+        return masterAccountUtil.buildResponse(pageResult);
+    }
+}
+package com.sc.scroe.masteraccount.service;
+
+import com.sc.scroe.masteraccount.dto.CreateMasterAccountRequest;
+import com.sc.scroe.masteraccount.dto.GetMasterAccountResponse;
+import com.sc.scroe.masteraccount.dto.MasterAccountValuesDTO;
+import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
+
+import org.springframework.data.domain.Page;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+public class MasterAccountUtil {
+
+    public GetMasterAccountResponse buildResponse(Page<MasterAccountEntity> pageResult) {
+        GetMasterAccountResponse response = new GetMasterAccountResponse();
+        response.setPage(pageResult.getNumber() + 1);
+        response.setPageCount(pageResult.getTotalPages());
+        response.setTotalCount(pageResult.getTotalElements());
+        response.setData(pageResult.getContent().stream().map(this::toMasterData).toList());
+        return response;
     }
 
-    @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ErrorResponse> handleResourceNotFound(DataIntegrityViolationException ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", ex.getMessage());
-        return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(new ErrorResponse(Arrays.asList(error)));
+    public GetMasterAccountResponse.MasterAccountData toMasterData(MasterAccountEntity entity) {
+        return new GetMasterAccountResponse.MasterAccountData(entity.getDealId(), entity.getClientId(), entity.getAccountNumber(), entity.getCountryCode(), entity.getCurrencyCode(), entity.getAccountName(), entity.getCompanyInitial(), entity.getClientType(), entity.getAccountType(), entity.getProductCode(), entity.getClassificationCode(), entity.getSubliteKycCddFlag(), entity.getSubliteKycCddRiskCode(), entity.getSubDefaultRiskCodeFlag(), List.of(entity.getSubDefaultRiskCode().split(",")), entity.getAddressInheritFlag(), entity.getClientsMoney(), entity.getClientsMoneyValue(), entity.getSubAccountClosureOffset(), entity.getInfoCode1(), entity.getInfoValue1(), entity.getInfoCode2(), entity.getInfoValue2(), entity.getAccountBranch(), entity.getConsolidatedStatementFlag(), entity.getGlid(), entity.getMasterNumber(), entity.getAccountCategory(), entity.getDsrClosingId(), entity.getAdviseInterestIndicator(), entity.getIbanNumber(), String.valueOf(entity.getAccountClosedDate()), entity.getSubProductCode(), entity.getCreditInterestCode(), entity.getDebitInterestCode(), entity.getInterestCode(), entity.getSuppressStatementFlag(), entity.getCreditSubAcctIntToMast(), String.valueOf(entity.getMaxSubAccountLimit()), String.valueOf(entity.getAccountOpenedDate()), entity.getAccountStatus());
     }
 
-    @ExceptionHandler(DuplicateResourceException.class)
-    public ResponseEntity<ErrorResponse> handleDuplicate(DuplicateResourceException ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", ex.getMessage());
-        return ResponseEntity
-                .status(HttpStatus.CONFLICT)
-                .body(new ErrorResponse(Arrays.asList(error)));
+    public void mapPostRequestToEntity(CreateMasterAccountRequest request, MasterAccountEntity entity) {
+        entity.setDealId(request.getDealId());
+        entity.setClientId(request.getClientId());
+
+        entity.setAccountNumber(request.getMasterAccountNumber());
+        entity.setCountryCode(request.getMasterAccountCountry());
+        entity.setCurrencyCode(request.getMasterAccountCurrencyCode());
+
+        entity.setAccountName(request.getMasterAccountName());
+        entity.setCompanyInitial(request.getCompanyInitial());
+
+        entity.setClientType(request.getClientType());
+
+        entity.setAccountType(request.getSubAccountType());
+
+        entity.setSubProductCode(request.getProductCode());
+
+        entity.setClassificationCode(request.getAccountClassificationCode());
+        entity.setProductCode(request.getProductCode());
+
+        entity.setSubliteKycCddFlag(request.getSubKycCddFlag());
+
+        entity.setSubliteKycCddRiskCode(request.getSubKycCddRiskCode());
+
+        entity.setSubDefaultRiskCodeFlag(request.getSubDefaultRiskCodeHoldFlag());
+
+        if (request.getSubDefaultRiskCode() != null && !request.getSubDefaultRiskCode().isEmpty()) {
+
+            entity.setSubDefaultRiskCode(String.join(",", request.getSubDefaultRiskCode()));
+        }
+
+        entity.setAddressInheritFlag(request.getMasterAccountAddressInheritFlag());
+
+        entity.setClientsMoney(request.getClientsMoney());
+
+        entity.setClientsMoneyValue(request.getInfoCodeClientsMoney());
+
+        entity.setSubAccountClosureOffset(request.getSubAccountClosureOffset());
+
+        entity.setInfoCode1(request.getInfoCode1());
+
+        entity.setInfoCode2(request.getInfoCode2());
+
+        entity.setInfoValue1(request.getInfoValue1());
+
+        entity.setInfoValue2(request.getInfoValue2());
+
+        entity.setAccountBranch(request.getAccountBranch());
+
+        entity.setConsolidatedStatementFlag(request.getConsolidatedStatementFlag());
+
+        entity.setGlid(request.getGlid());
+
+        entity.setMasterNumber(request.getMasterNumber());
+
+        entity.setAccountCategory(request.getAccountCategory());
+
+        entity.setDsrClosingId(request.getDsrClosingId());
+
+        entity.setAdviseInterestIndicator(request.getAdviseInterestIndicator());
+
+        entity.setIbanNumber(request.getIbanNumber());
+
+        entity.setAccountClosedDate(request.getCloseDate());
+
+        entity.setSubProductCode(request.getSubProductCode());
+
+        entity.setCreditInterestCode(request.getCreditInterestCode());
+
+        entity.setDebitInterestCode(request.getDebitInterestCode());
+
+        entity.setInterestCode(request.getInterestCode());
+
+        entity.setSuppressStatementFlag(request.getSuppressStatementFlag());
+
+        entity.setCreditSubAcctIntToMast(request.getCreditSubAccountInterestToMasterAccount());
+
+        entity.setMaxSubAccountLimit(request.getMaxSubAccountLimit());
+
+        entity.setAccountOpenedDate(request.getOpenedOn());
+
+        entity.setAccountStatus(request.getEbbsAccountStatus());
     }
 
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex) {
-        Map<String, String> error = new LinkedHashMap<>();
-        logger.error("Unexpected error occurred: {}", ex.getMessage(), ex);
-        error.put("code", ApiWebConstants.API_COMMON_ERROR_CODE);
-        error.put("description", "Technical Issue - Please contact the support team");
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new ErrorResponse(Arrays.asList(error)));
+    public void mapPutRequestToEntity(MasterAccountValuesDTO request, MasterAccountEntity entity) {
+
+        entity.setAccountNumber(request.getMasterAccountNumber());
+        entity.setCountryCode(request.getMasterAccountCountry());
+        entity.setCurrencyCode(request.getMasterAccountCurrencyCode());
+        entity.setAccountName(request.getMasterAccountName());
+        entity.setCompanyInitial(request.getCompanyInitial());
+        entity.setClientType(request.getClientType());
+        entity.setAccountType(request.getSubAccountType());
+        entity.setProductCode(request.getProductCode());
+
+        entity.setClassificationCode(request.getAccountClassificationCode());
+
+        entity.setSubliteKycCddFlag(request.getSubKycCddFlag());
+
+        entity.setSubliteKycCddRiskCode(request.getSubKycCddRiskCode());
+
+        entity.setSubDefaultRiskCodeFlag(request.getSubDefaultRiskCodeHoldFlag());
+
+        entity.setSubDefaultRiskCode(request.getSubDefaultRiskCode() == null ? null : String.join(",", request.getSubDefaultRiskCode()));
+
+        entity.setAddressInheritFlag(request.getMasterAccountAddressInheritFlag());
+
+        entity.setClientsMoney(request.getClientsMoney());
+
+        entity.setClientsMoneyValue(request.getInfoCodeClientsMoney());
+
+        entity.setSubAccountClosureOffset(String.valueOf(request.getSubAccountClosureOffset()));
+
+        entity.setInfoCode1(request.getInfoCode1());
+        entity.setInfoValue1(request.getInfoValue1());
+
+        entity.setInfoCode2(request.getInfoCode2());
+        entity.setInfoValue2(request.getInfoValue2());
+
+        entity.setAccountBranch(request.getAccountBranch());
+
+        entity.setConsolidatedStatementFlag(request.getConsolidatedStatementFlag());
+
+        entity.setGlid(request.getGlid());
+
+        entity.setMasterNumber(request.getMasterNumber());
+
+        entity.setAccountCategory(request.getAccountCategory());
+
+        entity.setDsrClosingId(request.getDsrClosingId());
+
+        entity.setAdviseInterestIndicator(request.getAdviseInterestIndicator());
+
+        entity.setIbanNumber(request.getIbanNumber());
+
+        entity.setAccountClosedDate(request.getCloseDate());
+
+        entity.setSubProductCode(request.getSubProductCode());
+
+        entity.setCreditInterestCode(request.getCreditInterestCode());
+
+        entity.setDebitInterestCode(request.getDebitInterestCode());
+
+        entity.setInterestCode(request.getInterestCode());
+
+        entity.setSuppressStatementFlag(request.getSuppressStatementFlag());
+
+        entity.setCreditSubAcctIntToMast(request.getCreditSubAccountInterestToMasterAccount());
+
+        entity.setMaxSubAccountLimit(request.getMaxSubAccountLimit());
+
+        entity.setAccountOpenedDate(request.getOpenedOn());
+
+        entity.setAccountStatus(request.getEbbsAccountStatus());
+
+        entity.setCreditInterestAccountNumber(request.getCreditInterestAccountNumber());
+
+        entity.setCreditInterestCurrencyCode(request.getCreditInterestCurrencyCode());
+    }
+}
+package com.sc.scroe.masteraccount.specification;
+
+import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
+import jakarta.persistence.criteria.Predicate;
+import org.springframework.data.jpa.domain.Specification;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class MasterAccountSpecification {
+
+    public static Specification<MasterAccountEntity> filterBy(String clientId, String dealId, String masterAccountNumber, String masterAccountCountry, String masterAccountCurrencyCode) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+
+            // Always fetch only non-deleted records
+            predicates.add(cb.isFalse(root.get("deleteFlag")));
+
+            if (clientId != null && !clientId.isBlank()) {
+                predicates.add(cb.equal(root.get("clientId"), clientId.trim()));
+            }
+
+            if (dealId != null && !dealId.isBlank()) {
+                predicates.add(cb.equal(root.get("dealId"), dealId.trim()));
+            }
+
+            if (masterAccountNumber != null && !masterAccountNumber.isBlank()) {
+                predicates.add(cb.equal(root.get("accountNumber"), masterAccountNumber.trim()));
+            }
+
+            if (masterAccountCountry != null && !masterAccountCountry.isBlank()) {
+                predicates.add(cb.equal(root.get("countryCode"), masterAccountCountry.trim()));
+            }
+
+            if (masterAccountCurrencyCode != null && !masterAccountCurrencyCode.isBlank()) {
+                predicates.add(cb.equal(root.get("currencyCode"), masterAccountCurrencyCode.trim()));
+            }
+
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
     }
 }
