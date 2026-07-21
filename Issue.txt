@@ -1,55 +1,226 @@
-Can you implement Testcases for the below with 100% Line Coverage?
-package com.sc.scroe.controller;
+Can you optimize Request and Get to use MasterAccountDTO for reusability?
+package com.sc.scroe.masteraccount.dto;
 
-import com.sc.scroe.masteraccount.dto.*;
-import com.sc.scroe.masteraccount.service.MasterAccountService;
+import com.fasterxml.jackson.annotation.JsonFormat;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
 
-import com.sc.scroe.shared.web.NoRecordsResponseUtil;
-import jakarta.validation.Valid;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import java.time.LocalDate;
+import java.util.List;
 
-@RestController
-@RequestMapping("/v1/subledger/masteraccounts")
-public class MasterAccountController {
+@Data
+public class CreateMasterAccountRequest {
 
-    private static final Logger logger = LoggerFactory.getLogger(MasterAccountController.class);
+    @NotBlank
+    private String dealId;
 
-    @Autowired
-    MasterAccountService subledgerMasterAccountService;
+    @NotBlank
+    private String clientId;
 
-    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<CreateMasterAccountResponse> create(@Valid @RequestBody CreateMasterAccountRequest request) {
-        CreateMasterAccountResponse masterAccountPostResponse = subledgerMasterAccountService.createMasterAccount(request);
-        logger.info("Created Master Account for accountNumber: {}", masterAccountPostResponse.getMasterAccountId());
-        return new ResponseEntity<>(new CreateMasterAccountResponse(masterAccountPostResponse.getMasterAccountId()), HttpStatus.CREATED);
-    }
+    @NotBlank
+    private String masterAccountNumber;
 
-    @PutMapping(path = "/{masterAccountId}", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<UpdateMasterAccountResponse> updateMasterAccount(@PathVariable Long masterAccountId, @Valid @RequestBody UpdateMasterAccountRequest request) {
+    @NotBlank
+    private String masterAccountCountry;
 
-        UpdateMasterAccountResponse response = subledgerMasterAccountService.updateMasterAccount(masterAccountId, request);
+    @NotBlank
+    private String masterAccountCurrencyCode;
 
-        return ResponseEntity.ok(response);
-    }
+    private String masterAccountName;
 
+    private String companyInitial;
 
-    @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> getMasterAccount(@RequestParam(value = "dealId", required = false) String dealId,
-                                              @RequestParam(value = "clientId", required = false) String clientId,
-                                              @RequestParam(value = "masterAccountNumber", required = false) String masterAccountNumber,
-                                              @RequestParam(value = "masterAccountCountry", required = false) String masterAccountCountry,
-                                              @RequestParam(value = "masterAccountCurrencyCode", required = false) String masterAccountCurrencyCode,
-                                              @RequestParam(value = "page", defaultValue = "1") Integer page,
-                                              @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize) {
-        GetMasterAccountResponse getMasterAccountResponse = subledgerMasterAccountService.getMasterAccount(dealId, clientId, masterAccountNumber, masterAccountCountry, masterAccountCurrencyCode, page, pageSize);
-        return NoRecordsResponseUtil.returnResponseOrThrowIfEmpty(getMasterAccountResponse, getMasterAccountResponse.getData(), "No Master account records found", NoRecordsResponseUtil.formatCriterion("dealId", dealId), NoRecordsResponseUtil.formatCriterion("clientId", clientId), NoRecordsResponseUtil.formatCriterion("masterAccountNumber", masterAccountNumber), NoRecordsResponseUtil.formatCriterion("masterAccountCountry", masterAccountCountry), NoRecordsResponseUtil.formatCriterion("masterAccountCurrencyCode", masterAccountCurrencyCode));
+    private String clientType;
+
+    // Manual Input
+    private String subAccountType;
+
+    private String productCode;
+
+    private String accountClassificationCode;
+
+    private String subKycCddFlag;
+
+    private String subKycCddRiskCode;
+
+    private String subDefaultRiskCodeHoldFlag;
+
+    private List<String> subDefaultRiskCode;
+
+    private String masterAccountAddressInheritFlag;
+
+    private String clientsMoney;
+
+    // maps to clients_money_value
+    private String infoCodeClientsMoney;
+
+    private String subAccountClosureOffset;
+
+    private String accountBranch;
+
+    private String consolidatedStatementFlag;
+
+    private String glid;
+
+    @NotBlank
+    private String masterNumber;
+
+    private String accountCategory;
+
+    private String dsrClosingId;
+
+    private String adviseInterestIndicator;
+
+    private String ibanNumber;
+
+    @JsonFormat(pattern = "yyyy-MM-dd")
+    private LocalDate closeDate;
+
+    private String subProductCode;
+
+    private String creditInterestCode;
+
+    private String debitInterestCode;
+
+    private String interestCode;
+
+    private String suppressStatementFlag;
+
+    private String creditSubAccountInterestToMasterAccount;
+
+    private String maxSubAccountLimit;
+
+    @JsonFormat(pattern = "yyyy-MM-dd")
+    private LocalDate openedOn;
+
+    private String ebbsAccountStatus;
+
+    private String infoCode1;
+
+    private String infoValue1;
+
+    private String infoCode2;
+
+    private String infoValue2;
+}
+package com.sc.scroe.masteraccount.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.List;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class GetMasterAccountResponse {
+    private Integer page;
+    private Integer pageCount;
+    private Long totalCount;
+    private List<MasterAccountData> data;
+
+    /**
+     * Fields returned for each item under the pattern GET API data array.
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class MasterAccountData {
+        private String dealId;
+        private String clientId;
+        private String masterAccountNumber;
+        private String masterAccountCountry;
+        private String masterAccountCurrencyCode;
+        private String masterAccountName;
+        private String companyInitial;
+        private String clientType;
+        private String subAccountType;
+        private String productCode;
+        private String accountClassificationCode;
+        private String subKycCddFlag;
+        private String subKycCddRiskCode;
+        private String subDefaultRiskCodeHoldFlag;
+        private List<String> subDefaultRiskCode;
+        private String masterAccountAddressInheritFlag;
+        private String clientsMoney;
+        private String infoCodeClientsMoney;
+        private String subAccountClosureOffset;
+        private String infoCode1;
+        private String infoValue1;
+        private String infoCode2;
+        private String infoValue2;
+        private String accountBranch;
+        private String consolidatedStatementFlag;
+        private String glid;
+        private String masterNumber;
+        private String accountCategory;
+        private String dsrClosingId;
+        private String adviseInterestIndicator;
+        private String ibanNumber;
+        private String closeDate;
+        private String subProductCode;
+        private String creditInterestCode;
+        private String debitInterestCode;
+        private String interestCode;
+        private String suppressStatementFlag;
+        private String creditSubAccountInterestToMasterAccount;
+        private String maxSubAccountLimit;
+        private String OpenedOn;
+        private String ebbsAccountStatus;
     }
 }
 
+package com.sc.scroe.masteraccount.dto;
 
+import lombok.Getter;
+import lombok.Setter;
+
+import java.time.LocalDate;
+import java.util.List;
+
+@Getter
+@Setter
+public class MasterAccountDTO {
+    private String masterAccountNumber;
+    private String masterAccountCountry;
+    private String masterAccountCurrencyCode;
+    private String masterAccountName;
+    private String companyInitial;
+    private String clientType;
+    private String subAccountType;
+    private String productCode;
+    private String accountClassificationCode;
+    private String subKycCddFlag;
+    private String subKycCddRiskCode;
+    private String subDefaultRiskCodeHoldFlag;
+    private List<String> subDefaultRiskCode;
+    private String masterAccountAddressInheritFlag;
+    private String clientsMoney;
+    private String infoCodeClientsMoney;
+    private Integer subAccountClosureOffset;
+    private String infoCode1;
+    private String infoValue1;
+    private String infoCode2;
+    private String infoValue2;
+    private String accountBranch;
+    private String consolidatedStatementFlag;
+    private String glid;
+    private String masterNumber;
+    private String accountCategory;
+    private String dsrClosingId;
+    private String adviseInterestIndicator;
+    private String ibanNumber;
+    private LocalDate closeDate;
+    private String subProductCode;
+    private String creditInterestCode;
+    private String debitInterestCode;
+    private String interestCode;
+    private String suppressStatementFlag;
+    private String creditSubAccountInterestToMasterAccount;
+    private String creditInterestAccountNumber;
+    private String creditInterestCurrencyCode;
+    private Integer maxSubAccountLimit;
+    private LocalDate openedOn;
+    private String ebbsAccountStatus;
+}
