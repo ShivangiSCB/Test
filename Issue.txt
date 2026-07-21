@@ -1,244 +1,55 @@
 Can you implement Testcases for the below with 100% Line Coverage?
-package com.sc.scroe.masteraccount.repository;
+package com.sc.scroe.controller;
 
-import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
-import java.util.Optional;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import com.sc.scroe.masteraccount.dto.*;
+import com.sc.scroe.masteraccount.service.MasterAccountService;
 
-public interface MasterAccountRepository extends JpaRepository<MasterAccountEntity, Long>, JpaSpecificationExecutor<MasterAccountEntity> {
+import com.sc.scroe.shared.web.NoRecordsResponseUtil;
+import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 
-    Optional<MasterAccountEntity> findFirstByDealIdAndDeleteFlagFalse(String dealId);
+@RestController
+@RequestMapping("/v1/subledger/masteraccounts")
+public class MasterAccountController {
 
-    Optional<MasterAccountEntity> findFirstByDealIdAndClientIdAndDeleteFlagFalse(String dealId, String clientId);
-}
-package com.sc.scroe.masteraccount.service;
+    private static final Logger logger = LoggerFactory.getLogger(MasterAccountController.class);
 
-import com.sc.scroe.masteraccount.dto.CreateMasterAccountRequest;
-import com.sc.scroe.masteraccount.dto.GetMasterAccountResponse;
-import com.sc.scroe.masteraccount.dto.MasterAccountValuesDTO;
-import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
+    @Autowired
+    MasterAccountService subledgerMasterAccountService;
 
-import org.springframework.data.domain.Page;
-import org.springframework.stereotype.Component;
-
-import java.util.List;
-
-@Component
-public class MasterAccountUtil {
-
-    public GetMasterAccountResponse buildResponse(Page<MasterAccountEntity> pageResult) {
-        GetMasterAccountResponse response = new GetMasterAccountResponse();
-        response.setPage(pageResult.getNumber() + 1);
-        response.setPageCount(pageResult.getTotalPages());
-        response.setTotalCount(pageResult.getTotalElements());
-        response.setData(pageResult.getContent().stream().map(this::toMasterData).toList());
-        return response;
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<CreateMasterAccountResponse> create(@Valid @RequestBody CreateMasterAccountRequest request) {
+        CreateMasterAccountResponse masterAccountPostResponse = subledgerMasterAccountService.createMasterAccount(request);
+        logger.info("Created Master Account for accountNumber: {}", masterAccountPostResponse.getMasterAccountId());
+        return new ResponseEntity<>(new CreateMasterAccountResponse(masterAccountPostResponse.getMasterAccountId()), HttpStatus.CREATED);
     }
 
-    public GetMasterAccountResponse.MasterAccountData toMasterData(MasterAccountEntity entity) {
-        return new GetMasterAccountResponse.MasterAccountData(entity.getDealId(), entity.getClientId(), entity.getAccountNumber(), entity.getCountryCode(), entity.getCurrencyCode(), entity.getAccountName(), entity.getCompanyInitial(), entity.getClientType(), entity.getAccountType(), entity.getProductCode(), entity.getClassificationCode(), entity.getSubliteKycCddFlag(), entity.getSubliteKycCddRiskCode(), entity.getSubDefaultRiskCodeFlag(), List.of(entity.getSubDefaultRiskCode().split(",")), entity.getAddressInheritFlag(), entity.getClientsMoney(), entity.getClientsMoneyValue(), entity.getSubAccountClosureOffset(), entity.getInfoCode1(), entity.getInfoValue1(), entity.getInfoCode2(), entity.getInfoValue2(), entity.getAccountBranch(), entity.getConsolidatedStatementFlag(), entity.getGlid(), entity.getMasterNumber(), entity.getAccountCategory(), entity.getDsrClosingId(), entity.getAdviseInterestIndicator(), entity.getIbanNumber(), String.valueOf(entity.getAccountClosedDate()), entity.getSubProductCode(), entity.getCreditInterestCode(), entity.getDebitInterestCode(), entity.getInterestCode(), entity.getSuppressStatementFlag(), entity.getCreditSubAcctIntToMast(), String.valueOf(entity.getMaxSubAccountLimit()), String.valueOf(entity.getAccountOpenedDate()), entity.getAccountStatus());
+    @PutMapping(path = "/{masterAccountId}", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<UpdateMasterAccountResponse> updateMasterAccount(@PathVariable Long masterAccountId, @Valid @RequestBody UpdateMasterAccountRequest request) {
+
+        UpdateMasterAccountResponse response = subledgerMasterAccountService.updateMasterAccount(masterAccountId, request);
+
+        return ResponseEntity.ok(response);
     }
 
-    public void mapPostRequestToEntity(CreateMasterAccountRequest request, MasterAccountEntity entity) {
-        entity.setDealId(request.getDealId());
-        entity.setClientId(request.getClientId());
 
-        entity.setAccountNumber(request.getMasterAccountNumber());
-        entity.setCountryCode(request.getMasterAccountCountry());
-        entity.setCurrencyCode(request.getMasterAccountCurrencyCode());
-
-        entity.setAccountName(request.getMasterAccountName());
-        entity.setCompanyInitial(request.getCompanyInitial());
-
-        entity.setClientType(request.getClientType());
-
-        entity.setAccountType(request.getSubAccountType());
-
-        entity.setSubProductCode(request.getProductCode());
-
-        entity.setClassificationCode(request.getAccountClassificationCode());
-        entity.setProductCode(request.getProductCode());
-
-        entity.setSubliteKycCddFlag(request.getSubKycCddFlag());
-
-        entity.setSubliteKycCddRiskCode(request.getSubKycCddRiskCode());
-
-        entity.setSubDefaultRiskCodeFlag(request.getSubDefaultRiskCodeHoldFlag());
-
-        if (request.getSubDefaultRiskCode() != null && !request.getSubDefaultRiskCode().isEmpty()) {
-
-            entity.setSubDefaultRiskCode(String.join(",", request.getSubDefaultRiskCode()));
-        }
-
-        entity.setAddressInheritFlag(request.getMasterAccountAddressInheritFlag());
-
-        entity.setClientsMoney(request.getClientsMoney());
-
-        entity.setClientsMoneyValue(request.getInfoCodeClientsMoney());
-
-        entity.setSubAccountClosureOffset(request.getSubAccountClosureOffset());
-
-        entity.setInfoCode1(request.getInfoCode1());
-
-        entity.setInfoCode2(request.getInfoCode2());
-
-        entity.setInfoValue1(request.getInfoValue1());
-
-        entity.setInfoValue2(request.getInfoValue2());
-
-        entity.setAccountBranch(request.getAccountBranch());
-
-        entity.setConsolidatedStatementFlag(request.getConsolidatedStatementFlag());
-
-        entity.setGlid(request.getGlid());
-
-        entity.setMasterNumber(request.getMasterNumber());
-
-        entity.setAccountCategory(request.getAccountCategory());
-
-        entity.setDsrClosingId(request.getDsrClosingId());
-
-        entity.setAdviseInterestIndicator(request.getAdviseInterestIndicator());
-
-        entity.setIbanNumber(request.getIbanNumber());
-
-        entity.setAccountClosedDate(request.getCloseDate());
-
-        entity.setSubProductCode(request.getSubProductCode());
-
-        entity.setCreditInterestCode(request.getCreditInterestCode());
-
-        entity.setDebitInterestCode(request.getDebitInterestCode());
-
-        entity.setInterestCode(request.getInterestCode());
-
-        entity.setSuppressStatementFlag(request.getSuppressStatementFlag());
-
-        entity.setCreditSubAcctIntToMast(request.getCreditSubAccountInterestToMasterAccount());
-
-        entity.setMaxSubAccountLimit(request.getMaxSubAccountLimit());
-
-        entity.setAccountOpenedDate(request.getOpenedOn());
-
-        entity.setAccountStatus(request.getEbbsAccountStatus());
-    }
-
-    public void mapPutRequestToEntity(MasterAccountValuesDTO request, MasterAccountEntity entity) {
-
-        entity.setAccountNumber(request.getMasterAccountNumber());
-        entity.setCountryCode(request.getMasterAccountCountry());
-        entity.setCurrencyCode(request.getMasterAccountCurrencyCode());
-        entity.setAccountName(request.getMasterAccountName());
-        entity.setCompanyInitial(request.getCompanyInitial());
-        entity.setClientType(request.getClientType());
-        entity.setAccountType(request.getSubAccountType());
-        entity.setProductCode(request.getProductCode());
-
-        entity.setClassificationCode(request.getAccountClassificationCode());
-
-        entity.setSubliteKycCddFlag(request.getSubKycCddFlag());
-
-        entity.setSubliteKycCddRiskCode(request.getSubKycCddRiskCode());
-
-        entity.setSubDefaultRiskCodeFlag(request.getSubDefaultRiskCodeHoldFlag());
-
-        entity.setSubDefaultRiskCode(request.getSubDefaultRiskCode() == null ? null : String.join(",", request.getSubDefaultRiskCode()));
-
-        entity.setAddressInheritFlag(request.getMasterAccountAddressInheritFlag());
-
-        entity.setClientsMoney(request.getClientsMoney());
-
-        entity.setClientsMoneyValue(request.getInfoCodeClientsMoney());
-
-        entity.setSubAccountClosureOffset(String.valueOf(request.getSubAccountClosureOffset()));
-
-        entity.setInfoCode1(request.getInfoCode1());
-        entity.setInfoValue1(request.getInfoValue1());
-
-        entity.setInfoCode2(request.getInfoCode2());
-        entity.setInfoValue2(request.getInfoValue2());
-
-        entity.setAccountBranch(request.getAccountBranch());
-
-        entity.setConsolidatedStatementFlag(request.getConsolidatedStatementFlag());
-
-        entity.setGlid(request.getGlid());
-
-        entity.setMasterNumber(request.getMasterNumber());
-
-        entity.setAccountCategory(request.getAccountCategory());
-
-        entity.setDsrClosingId(request.getDsrClosingId());
-
-        entity.setAdviseInterestIndicator(request.getAdviseInterestIndicator());
-
-        entity.setIbanNumber(request.getIbanNumber());
-
-        entity.setAccountClosedDate(request.getCloseDate());
-
-        entity.setSubProductCode(request.getSubProductCode());
-
-        entity.setCreditInterestCode(request.getCreditInterestCode());
-
-        entity.setDebitInterestCode(request.getDebitInterestCode());
-
-        entity.setInterestCode(request.getInterestCode());
-
-        entity.setSuppressStatementFlag(request.getSuppressStatementFlag());
-
-        entity.setCreditSubAcctIntToMast(request.getCreditSubAccountInterestToMasterAccount());
-
-        entity.setMaxSubAccountLimit(request.getMaxSubAccountLimit());
-
-        entity.setAccountOpenedDate(request.getOpenedOn());
-
-        entity.setAccountStatus(request.getEbbsAccountStatus());
-
-        entity.setCreditInterestAccountNumber(request.getCreditInterestAccountNumber());
-
-        entity.setCreditInterestCurrencyCode(request.getCreditInterestCurrencyCode());
+    @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> getMasterAccount(@RequestParam(value = "dealId", required = false) String dealId,
+                                              @RequestParam(value = "clientId", required = false) String clientId,
+                                              @RequestParam(value = "masterAccountNumber", required = false) String masterAccountNumber,
+                                              @RequestParam(value = "masterAccountCountry", required = false) String masterAccountCountry,
+                                              @RequestParam(value = "masterAccountCurrencyCode", required = false) String masterAccountCurrencyCode,
+                                              @RequestParam(value = "page", defaultValue = "1") Integer page,
+                                              @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize) {
+        GetMasterAccountResponse getMasterAccountResponse = subledgerMasterAccountService.getMasterAccount(dealId, clientId, masterAccountNumber, masterAccountCountry, masterAccountCurrencyCode, page, pageSize);
+        return NoRecordsResponseUtil.returnResponseOrThrowIfEmpty(getMasterAccountResponse, getMasterAccountResponse.getData(), "No Master account records found", NoRecordsResponseUtil.formatCriterion("dealId", dealId), NoRecordsResponseUtil.formatCriterion("clientId", clientId), NoRecordsResponseUtil.formatCriterion("masterAccountNumber", masterAccountNumber), NoRecordsResponseUtil.formatCriterion("masterAccountCountry", masterAccountCountry), NoRecordsResponseUtil.formatCriterion("masterAccountCurrencyCode", masterAccountCurrencyCode));
     }
 }
-package com.sc.scroe.masteraccount.specification;
 
-import com.sc.scroe.masteraccount.entity.MasterAccountEntity;
-import jakarta.persistence.criteria.Predicate;
-import org.springframework.data.jpa.domain.Specification;
 
-import java.util.ArrayList;
-import java.util.List;
-
-public class MasterAccountSpecification {
-
-    public static Specification<MasterAccountEntity> filterBy(String clientId, String dealId, String masterAccountNumber, String masterAccountCountry, String masterAccountCurrencyCode) {
-        return (root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
-
-            // Always fetch only non-deleted records
-            predicates.add(cb.isFalse(root.get("deleteFlag")));
-
-            if (clientId != null && !clientId.isBlank()) {
-                predicates.add(cb.equal(root.get("clientId"), clientId.trim()));
-            }
-
-            if (dealId != null && !dealId.isBlank()) {
-                predicates.add(cb.equal(root.get("dealId"), dealId.trim()));
-            }
-
-            if (masterAccountNumber != null && !masterAccountNumber.isBlank()) {
-                predicates.add(cb.equal(root.get("accountNumber"), masterAccountNumber.trim()));
-            }
-
-            if (masterAccountCountry != null && !masterAccountCountry.isBlank()) {
-                predicates.add(cb.equal(root.get("countryCode"), masterAccountCountry.trim()));
-            }
-
-            if (masterAccountCurrencyCode != null && !masterAccountCurrencyCode.isBlank()) {
-                predicates.add(cb.equal(root.get("currencyCode"), masterAccountCurrencyCode.trim()));
-            }
-
-            return cb.and(predicates.toArray(new Predicate[0]));
-        };
-    }
-}
